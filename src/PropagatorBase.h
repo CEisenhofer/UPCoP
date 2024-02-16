@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ADTSolver.h"
-#include "CadicalWrapper.h"
 #include "CLIParser.h"
 #include "CNF.h"
 #include "GroundLiteral.h"
@@ -93,7 +92,6 @@ protected:
     const CNF<IndexedClause*>& matrix;
 
     pvector<IndexedClause> initClauses;
-    bool is_conflict = false;
 
 public:
     ComplexADTSolver& term_solver;

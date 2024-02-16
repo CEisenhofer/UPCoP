@@ -1,6 +1,5 @@
 #pragma once
 #include "CadicalWrapper.h"
-#include "utils.h"
 
 struct Term;
 struct term_instance;
@@ -99,7 +98,6 @@ namespace std {
 struct Term : public RawTerm {
     const unsigned HashID;
     const bool Ground;
-    optional<z3::expr> Z3Expr;
     SimpleADTSolver& Solver;
 
     unsigned getSolverId() const;

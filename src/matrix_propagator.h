@@ -1,6 +1,5 @@
 #pragma once
 #include "PropagatorBase.h"
-#include <utility>
 
 struct path_element {
     const IndexedClause& clause;
@@ -14,6 +13,7 @@ struct clause_instance {
     const IndexedClause* clause;
     const unsigned copy_idx;
     const literal selector;
+    bool propagated;
     tri_state value;
     const vector<GroundLiteral> literals;
 
@@ -22,7 +22,7 @@ struct clause_instance {
     auto operator=(clause_instance& other) = delete;
 
     clause_instance(const IndexedClause* clause, unsigned copyIdx, literal selectionExpr, vector<GroundLiteral> literals) :
-            clause(clause), copy_idx(copyIdx), selector(selectionExpr), value(undef), literals(std::move(literals)) { }
+            clause(clause), copy_idx(copyIdx), selector(selectionExpr), propagated(false), value(undef), literals(std::move(literals)) { }
 
     /*vector<literal> GetVariables(PropagatorBase& propagator, DatatypeSort[] sorts) {
         vector<literal> variables;
@@ -64,18 +64,32 @@ public:
         }
     }
 
+public:
+
     void next_level() {
         lvl++;
+
+        if (progParams.Mode == Core)
+            next_level_core_prep();
+
         reinit_solver();
+
         if (progParams.Mode == Rectangle)
             next_level_rect();
-        else
+        else if (progParams.Mode == Core)
             next_level_core();
+        else {
+            assert(false);
+        }
     }
 
 private:
+
+    vector<int> core;
+
     void next_level_rect(unsigned inc_lvl = 1);
-    void next_level_core();
+    void next_level_core_prep();
+    void next_level_core(bool first = false);
 
 public:
 
@@ -149,4 +163,7 @@ public:
 
         CheckProof(uniSolver, chosen);
     }
+
+protected:
+    void reinit_solver2() override;
 };

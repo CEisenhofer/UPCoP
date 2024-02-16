@@ -1,5 +1,6 @@
 #include "CLIParser.h"
 #include "utils.h"
+#include <iostream>
 #include <filesystem>
 
 static void CrashParams(const std::string& error) {

@@ -39,7 +39,7 @@ bool ComplexADTSolver::Asserted(literal e, const Term* lhs, unsigned lhsCpy, con
     assert(&lhs->Solver == &rhs->Solver);
     return isTrue
            ? lhs->Solver.Unify(e, lhs, lhsCpy, rhs, rhsCpy)
-           : lhs->Solver.NonUnify(e, lhs, lhsCpy, rhs, rhsCpy);
+           : lhs->Solver.NonUnify(propagator->m.mk_not(e), lhs, lhsCpy, rhs, rhsCpy);
 }
 
 literal ComplexADTSolver::MakeEqualityExpr(const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy) {
@@ -62,12 +62,6 @@ literal ComplexADTSolver::MakeEqualityExpr(const Term* lhs, unsigned lhsCpy, con
 
 literal ComplexADTSolver::MakeDisEqualityExpr(const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy) {
     return propagator->m.mk_not(MakeEqualityExpr(lhs, lhsCpy, rhs, rhsCpy));
-}
-
-void ComplexADTSolver::final() {
-    for (auto& solver: Solvers) {
-        solver->Final();
-    }
 }
 
 void ComplexADTSolver::PeekTerm(const string& solver, const string& name, int argCnt) {
@@ -490,8 +484,7 @@ bool SimpleADTSolver::NonUnify(literal just, const Term* lhs, unsigned lhsCpy, c
     lazyDiseq->Justifications.push_back(just);
     vector<observerItem> observerUpdates;
 
-    if (NonUnify(false, lhs, lhsCpy, rhs, rhsCpy, lazyDiseq->Justifications, lazyDiseq->SubDisequalities,
-                 observerUpdates))
+    if (NonUnify(false, lhs, lhsCpy, rhs, rhsCpy, lazyDiseq->Justifications, lazyDiseq->SubDisequalities, observerUpdates))
         return true;
     if (lazyDiseq->SubDisequalities.empty()) {
         propagator().propagate_conflict(lazyDiseq->Justifications);

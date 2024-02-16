@@ -197,7 +197,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
 
         if (res != sat) {
             if (!silent)
-                cout << "Failed with depth " << id << endl;
+                cout << "Failed with depth " << id << "\n" << endl;
             timeLeft -= (int) stop_watch();
             if (timeLeft <= 0) {
                 if (!silent)
@@ -225,7 +225,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         }
 
         if (!silent)
-            cout << "Found proof at level: " << id << endl;
+            cout << "\nFound proof at level: " << id << endl;
         unordered_map<unsigned, int> usedClauses;
         unordered_map<variableIdentifier, string> prettyNames;
 

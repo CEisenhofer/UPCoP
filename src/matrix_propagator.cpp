@@ -26,7 +26,7 @@ matrix_propagator::matrix_propagator(CNF<IndexedClause*>& cnf, ComplexADTSolver&
     if (progParams.Mode == Rectangle)
         next_level_rect(lvl);
     else
-        next_level_core();
+        next_level_core(true);
 }
 
 void matrix_propagator::next_level_rect(unsigned inc_lvl) {
@@ -45,11 +45,10 @@ void matrix_propagator::next_level_rect(unsigned inc_lvl) {
     }
 }
 
-void matrix_propagator::next_level_core() {
-    assert(progParams.Mode == Rectangle);
-    vector<unsigned> core;
+void matrix_propagator::next_level_core_prep() {
+    core.clear();
     for (unsigned c = 0; c < matrix.size(); c++) {
-        if (solver->failed((signed)c + 1)) {
+        if (solver->failed((signed) c + 1)) {
             priority[c]++;
             core.push_back(c);
         }
@@ -59,6 +58,10 @@ void matrix_propagator::next_level_core() {
         Satisfiable = true;
         return;
     }
+}
+
+void matrix_propagator::next_level_core(bool first) {
+    assert(progParams.Mode == Core);
 
     auto instClause = [&](unsigned v) {
         assert(!matrix[v]->Ground || multiplicity[v] <= 1);
@@ -66,39 +69,43 @@ void matrix_propagator::next_level_core() {
         priority[v] = 0;
         GetGround(matrix[v], cachedClauses[v].size());
 
-        if (!matrix[v]->Ground) {
-            clauseLimitListExpr[v] = m.mk_lit(new_var("limit#" + to_string(v)));
-            clauseLimitMap.insert(make_pair(clauseLimitListExpr[v], v));
-        }
+//        if (!matrix[v]->Ground) {
+//            clauseLimitListExpr[v] = m.mk_lit(new_observed_var("limit#" + to_string(v)));
+//            clauseLimitMap.insert(make_pair(clauseLimitListExpr[v], v));
+//        }
         Log("Increase clause #" + to_string(v) + " to " + to_string(cachedClauses[v].size()));
     };
 
-    unsigned maxVar = 1;
-    unsigned maxValue = 0;
-    for (unsigned v: core) {
-        if (priority[v] > maxValue) {
-            maxVar = v;
-            maxValue = priority[v];
-        }
-    }
-
-    /*
-    if (IdLevel % 10 == 0) {
-        Log("Massive instantiation");
-        int cnt = 0;
-        for (int i = 0; i < core.size(); i++) {
-            if (priority[core[i]] == maxValue) {
-                instClause(i);
-                cnt++;
+    if (!first) {
+        unsigned maxVar = 1;
+        unsigned maxValue = 0;
+        for (unsigned v: core) {
+            if (priority[v] > maxValue) {
+                maxVar = v;
+                maxValue = priority[v];
             }
         }
-
-        Log(to_string(cnt) + " instantiations");
+        instClause(maxVar);
     }
     else {
-        Log("Selected instantiation");*/
-    instClause(maxVar);
-    //}
+        for (int c = 0; c < matrix.size(); c++) {
+            priority[c] = 0;
+            if (matrix.IsConjecture(c)) {
+                GetGround(matrix[c], 0);
+                multiplicity[c] = 1;
+            }
+            else
+                multiplicity[c] = 0;
+
+            clauseLimitListExpr[c] = m.mk_lit(new_observed_var("limit#" + to_string(c)));
+            clauseLimitMap.insert(make_pair(clauseLimitListExpr[c], c));
+        }
+    }
+
+    for (int i = 0; i < matrix.size(); i++) {
+        if (!matrix[i]->Ground || multiplicity[i] == 0)
+            solver->assume(clauseLimitListExpr[i]->get_lit());
+    }
 }
 
 clause_instance* matrix_propagator::GetClauseInstanceInfo(const IndexedClause* clause, unsigned cpyIdx, literal_term* selector) {
@@ -253,7 +260,11 @@ void matrix_propagator::fixed2(literal_term* e, bool value) {
     info->value = sat;
     chosen.push_back(info);
     add_undo([&]() { chosen.back()->value = undef; chosen.pop_back(); });
-    PropagateRules(e, info);
+
+    if (!info->propagated) {
+        PropagateRules(e, info);
+        info->propagated = true;
+    }
 
     pb_clause_limit();
 }
@@ -292,7 +303,7 @@ formula_term* matrix_propagator::ConnectLiteral(clause_instance* info, const Gro
         for (int i = 0; i < matrix.size(); i++) {
             for (int j = 0; j < matrix[i]->size(); j++) {
                 CacheUnification(lit, *matrix[i]->literals[j]);
-                const SubtermHint* unification = UnificationHints.get(lit.Literal->Index, matrix[i][j].Index);
+                const SubtermHint* unification = UnificationHints.get(lit.Literal->Index, matrix[i]->literals[j]->Index);
                 if (Large2DArray::is_invalid(unification) || lit.Literal->polarity == matrix[i]->literals[j]->polarity)
                     continue;
                 if (!cachedClauses[i].empty() && matrix[i]->Ground) {
@@ -319,8 +330,6 @@ formula_term* matrix_propagator::ConnectLiteral(clause_instance* info, const Gro
 
 void matrix_propagator::final() {
 
-    term_solver.final();
-
     assert(!chosen.empty());
     vector<vector<path_element>> paths;
     LogN("Final (" << ++finalCnt << ")");
@@ -339,12 +348,12 @@ void matrix_propagator::final() {
     vector<literal> justifications;
     justifications.reserve(chosen.size());
     for (int i = 0; i < chosen.size(); i++) {
-        justifications[i] = chosen[i]->selector;
+        justifications.push_back(chosen[i]->selector);
     }
     if (progParams.Mode == Core) {
         // TODO:
         throw solving_exception("TODO");
-        for (auto p : chosen) {
+        for (auto& p : chosen) {
             if (p->copy_idx == multiplicity[p->clause->Index] - 1 && !p->clause->Ground) {
                 justifications.push_back(clauseLimitListExpr[p->clause->Index]);
             }
@@ -356,7 +365,7 @@ void matrix_propagator::final() {
             for (int j = i + 1; j < path.size(); j++) {
                 assert(!AreConnected(path[i].lit, path[j].lit));
                 vector<formula> unificationConstraint;
-                auto* unification = UnificationHints.get(path[i].lit.Literal->Index, path[j].lit.Literal->Index);
+                const auto* unification = UnificationHints.get(path[i].lit.Literal->Index, path[j].lit.Literal->Index);
                 assert(unification != nullptr);
                 if (!Large2DArray::is_invalid(unification) && path[i].lit.Literal->polarity != path[j].lit.Literal->polarity) {
                     unification->GetPosConstraints(*this, path[i].lit, path[j].lit, unificationConstraint);
@@ -416,5 +425,11 @@ void matrix_propagator::FindPath(int clauseIdx, const vector<clause_instance*>& 
         if (foundPaths.size() >= limit)
             return;
         path.pop_back();
+    }
+}
+
+void matrix_propagator::reinit_solver2() {
+    for (auto* clause : allClauses) {
+        clause->propagated = false;
     }
 }

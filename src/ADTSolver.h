@@ -1,7 +1,5 @@
 #pragma once
-#include "CadicalWrapper.h"
 #include "Term.h"
-#include <iostream>
 
 struct PropagatorBase;
 
@@ -85,13 +83,11 @@ public:
 
     bool Asserted(literal e, bool isTrue);
 
-    static bool Asserted(literal e, const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy, bool isTrue);
+    bool Asserted(literal e, const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy, bool isTrue);
 
     literal MakeEqualityExpr(const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy);
 
     literal MakeDisEqualityExpr(const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy);
-
-    void final();
 
     void PeekTerm(const string& solver, const string& name, int argCnt);
 
@@ -180,8 +176,6 @@ struct SimpleADTSolver {
     bool NonUnify(literal just, const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy);
     bool NonUnify(bool skipRoot, const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy,
                   vector<literal>& justifications, vector<LazySubDiseq>& delayed, vector<observerItem>& observerUpdates);
-
-    inline void Final() { }
 
     string ToString() const;
 

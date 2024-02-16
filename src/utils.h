@@ -163,6 +163,24 @@ namespace std {
             return z3::eq(x, y);
         }
     };
+
+    template<>
+    struct hash<std::vector<int>> {
+        inline size_t operator()(const std::vector<int>& x) const {
+            size_t ret = 0;
+            for (int v : x) {
+                ret = (324723947 * ret + v) ^ 93485734985;
+            }
+            return ret;
+        }
+    };
+
+    template<>
+    struct equal_to<std::vector<int>> {
+        inline bool operator()(const std::vector<int>& x, const std::vector<int>& y) const {
+            return x == y;
+        }
+    };
 }
 
 inline void add_range(z3::expr_vector& v, const z3::expr_vector& other) {

@@ -48,19 +48,14 @@ void CaDiCalPropagator::propagate_conflict(std::vector<literal> just) {
             Log(", ");
     }
     LogN("");
+#endif
 
     std::vector<int> j;
     j.reserve(just.size());
     for (literal k: just) {
         j.push_back(-k->get_lit());
     }
-#else
-    for (literal& k : just) {
-        k = -k;
-    }
-    std::vector<int>& j = just;
-#endif
-    propagations.emplace_back(std::move(j), nullptr);
+    propagations.emplace_back(std::move(j));
 }
 
 void CaDiCalPropagator::propagate(const std::vector<literal>& just, formula_term* prop) {
@@ -84,118 +79,144 @@ void CaDiCalPropagator::propagate(const std::vector<literal>& just, formula_term
     LogN(prop->to_string());
 #endif
 
-    std::vector<std::pair<std::vector<int>, formula>> aux;
+    std::vector<std::vector<int>> aux;
     const literal_term* c = prop->get_lits(*this, aux);
     aux.emplace_back();
-    aux.back().first.reserve(just.size());
-    aux.back().first.push_back(c->get_lit());
+    aux.back().reserve(just.size());
+    aux.back().push_back(c->get_lit());
     for (literal k: just) {
-        aux.back().first.push_back(-k->get_lit());
+        aux.back().push_back(-k->get_lit());
     }
     // aux.back().second = prop; -- not required; the get_lits should do that
 
+    if (contains(prev_propagations, aux.back())) {
+        assert(aux.size() == 1);
+        // We already propagated this -> skip
+        return;
+    }
     for (auto& k: aux) {
         propagations.emplace_back(std::move(k));
     }
+    prev_propagations.insert(aux.back());
 }
 
 void CaDiCalPropagator::reinit_solver() {
+    bool first = solver == nullptr;
+    solver = new CaDiCaL::Solver();
+    solver->set("ilb", false);
+    solver->set("ilbassumptions", false);
+    solver->connect_external_propagator(this);
+
+    if (first)
+        return;
+
     // Reset everything done so far
     undoStackSize.resize(0);
     while (!undoStack.empty()) {
         undoStack.back()();
         undoStack.pop_back();
     }
-    delete solver; // now safe to do a hard reset of CaDiCaL
-    solver = new CaDiCaL::Solver();
-    solver->connect_external_propagator(this);
     // reintroduce all terms used so far
-    for (auto* formula : m.id_to_formula) {
-        if (formula->get_var_id() != 0)
-            solver->add_observed_var(formula->get_var_id());
+    for (auto* formula: m.id_to_formula) {
+        int id = formula->get_var_id();
+        if (id != 0)
+            solver->add_observed_var(id);
+    }
+
+    prev_propagations.clear();
+    is_conflict = false;
+
+    reinit_solver2();
+}
+
+void CaDiCalPropagator::notify_assignment(const vector<int>& lits) {
+    for (int lit : lits) {
+        bool value = lit > 0;
+
+        literal v = m.mk_lit(abs(lit));
+        LogN("Fixed: " << literal_to_string(v) << " = " << value << " [" << lit << "]");
+
+        assert(propagationReadIdx == 0);
+        assert(interpretation.find(v) == interpretation.end());
+        interpretation.insert(std::make_pair(v, value));
+        undoStack.emplace_back([this, v]() {
+            interpretation.erase(v);
+        });
+
+        fixed(v, value);
+        if (is_conflict)
+            return;
     }
 }
 
-void CaDiCalPropagator::notify_assignment(int lit, bool is_fixed) {
-    bool value = lit > 0;
-
-    literal v = m.mk_lit(abs(lit));
-    LogN("Fixed: " << literal_to_string(v) << " = " << value << " [" << is_fixed << "]");
-
-    assert(propagationReadIdx == 0);
-    assert(interpretation.find(v) == interpretation.end());
-    interpretation.insert(std::make_pair(v, value));
-    undoStack.emplace_back([this, v]() {
-        interpretation.erase(v);
-    });
-
-    fixed(v, value);
-}
-
 void CaDiCalPropagator::notify_new_decision_level() {
+    assert(propagationReadIdx == 0);
     LogN("Push");
     undoStackSize.push_back(undoStack.size());
+
+    assert(propagations.size() == propagationIdx);
 }
 
 void CaDiCalPropagator::notify_backtrack(size_t new_level) {
+    assert(propagationReadIdx == 0);
     LogN("Pop: " << (undoStackSize.size() - new_level));
+    is_conflict = false;
     const unsigned prev = undoStackSize[new_level];
     undoStackSize.resize(new_level);
     while (undoStack.size() > prev) {
         undoStack.back()();
         undoStack.pop_back();
     }
-
-    assert(propagations.size() >= propagationIdx);
-    while (propagations.size() > propagationIdx) {
-        if (propagations.back().second != nullptr)
-            propagations.back().second->reset_aux();
-        propagations.pop_back();
-    }
 }
 
 bool CaDiCalPropagator::cb_check_found_model(const std::vector<int>& model) {
     assert(propagationReadIdx == 0);
+    assert(!is_conflict);
     final();
-    return true;
+    return propagations.size() == propagationIdx;
 }
 
-bool CaDiCalPropagator::cb_has_external_clause() {
+bool CaDiCalPropagator::cb_has_external_clause(bool& is_forgettable) {
     return propagationIdx < propagations.size();
 }
 
 int CaDiCalPropagator::cb_add_external_clause_lit() {
-    assert(cb_has_external_clause());
+#ifndef NDEBUG
+    bool f = false;
+    assert(cb_has_external_clause(f));
+#endif
     auto& toAdd = propagations[propagationIdx];
-    if (propagationReadIdx >= toAdd.first.size()) {
-        if (toAdd.second != nullptr)
-            toAdd.second->fix_aux(); // from now on the aux literal is uniquely defined and used
+    if (propagationReadIdx >= toAdd.size()) {
         propagationIdx++;
         propagationReadIdx = 0;
+
+        if (propagationIdx >= propagations.size()) {
+            propagations.clear();
+            propagationIdx = 0;
+        }
         return 0;
     }
-    return toAdd.first[propagationReadIdx++];
+    return toAdd[propagationReadIdx++];
 }
 
-const literal_term* literal_term::get_lits(CaDiCalPropagator& propagator, std::vector<std::pair<std::vector<int>, formula>>& aux) {
+const literal_term* literal_term::get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) {
     return this;
 }
 
-const literal_term* not_term::get_lits(CaDiCalPropagator& propagator, std::vector<std::pair<std::vector<int>, formula>>& aux) {
+const literal_term* not_term::get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) {
     assert(!t->is_true() && !t->is_false());
-
     if (var_id != 0)
         return manager.mk_lit(var_id);
-    var_id = propagator.new_observed_var("proxy: " + to_string());
+    var_id = propagator.new_observed_var("<" + to_string() + ">");
     const formula_term* arg = t->get_lits(propagator, aux);
-    aux.push_back(std::make_pair(std::vector<int>({-var_id, -arg->get_var_id()}), nullptr));
-    aux.push_back(std::make_pair(std::vector<int>({var_id, arg->get_var_id()}), this));
+    aux.emplace_back(std::vector<int>({-var_id, -arg->get_var_id()}));
+    aux.emplace_back(std::vector<int>({var_id, arg->get_var_id()}));
     return manager.mk_lit(var_id);
 }
 
-const literal_term* and_term::get_lits(CaDiCalPropagator& propagator, std::vector<std::pair<std::vector<int>, formula>>& aux) {
-    if (auxLit.id != 0)
-        return manager.mk_lit(auxLit.id);
+const literal_term* and_term::get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) {
+    if (var_id != 0)
+        return manager.mk_lit(var_id);
     assert(args.size() > 1);
     std::vector<int> argLits;
     argLits.reserve(args.size());
@@ -203,23 +224,23 @@ const literal_term* and_term::get_lits(CaDiCalPropagator& propagator, std::vecto
         const auto* v = arg->get_lits(propagator, aux);
         argLits.push_back(v->get_lit());
     }
-    auxLit.id = propagator.new_observed_var("proxy: " + to_string());
+    var_id = propagator.new_observed_var("<" + to_string() + ">");
     for (int arg: argLits) {
-        aux.emplace_back(std::vector<int>({-auxLit.id, arg}), nullptr);
+        aux.emplace_back(std::vector<int>({-var_id, arg}));
     }
     std::vector<int> prop;
     prop.reserve(1 + argLits.size());
-    prop.push_back((signed)auxLit.id);
+    prop.push_back((signed)var_id);
     for (int arg: argLits) {
         prop.push_back(-arg);
     }
-    aux.emplace_back(std::move(prop), this);
-    return manager.mk_lit(auxLit.id);
+    aux.emplace_back(std::move(prop));
+    return manager.mk_lit(var_id);
 }
 
-const literal_term* or_term::get_lits(CaDiCalPropagator& propagator, std::vector<std::pair<std::vector<int>, formula>>& aux) {
-    if (auxLit.id != 0)
-        return manager.mk_lit(auxLit.id);
+const literal_term* or_term::get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) {
+    if (var_id != 0)
+        return manager.mk_lit(var_id);
     assert(args.size() > 1);
     std::vector<int> argLits;
     argLits.reserve(args.size());
@@ -227,18 +248,18 @@ const literal_term* or_term::get_lits(CaDiCalPropagator& propagator, std::vector
         const auto* v = arg->get_lits(propagator, aux);
         argLits.push_back(v->get_lit());
     }
-    auxLit.id = propagator.new_observed_var("proxy: " + to_string());
+    var_id = propagator.new_observed_var("<" + to_string() + ">");
     for (int arg: argLits) {
-        aux.emplace_back(std::vector<int>({-arg, (signed)auxLit.id}), nullptr);
+        aux.emplace_back(std::vector<int>({-arg, (signed)var_id}));
     }
     std::vector<int> prop;
     prop.reserve(1 + argLits.size());
-    prop.push_back(-auxLit.id);
+    prop.push_back(-var_id);
     for (int arg: argLits) {
         prop.push_back(arg);
     }
-    aux.emplace_back(std::move(prop), this);
-    return manager.mk_lit(auxLit.id);
+    aux.emplace_back(std::move(prop));
+    return manager.mk_lit(var_id);
 }
 
 true_term* formula_manager::mk_true() const {
@@ -271,7 +292,7 @@ inline const T& getX(std::vector<T>& vec, unsigned idx) {
 
 literal_term* formula_manager::mk_lit(unsigned v, bool neg) {
     assert(v != 0);
-    literal_term* ret = nullptr;
+    literal_term* ret;
     if (neg) {
         ret = getX(neg_cadical_to_formula, v);
         if (ret != nullptr)

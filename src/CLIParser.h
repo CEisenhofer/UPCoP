@@ -1,8 +1,6 @@
 #pragma once
 
 #include <climits>
-#include <string>
-#include <iostream>
 
 enum InputFormat {
     TPTP,

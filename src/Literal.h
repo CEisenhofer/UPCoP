@@ -24,8 +24,6 @@ struct Literal {
         return polarity != l.polarity && nameID == l.nameID;
     }
 
-    z3::expr_vector GetInstances(const z3::expr_vector& args);
-
     inline bool operator==(const Literal& l) const {
         assert((name == l.name) == (nameID == l.nameID));
         return nameID == l.nameID &&

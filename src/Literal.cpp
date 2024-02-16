@@ -19,17 +19,6 @@ Literal::Literal(z3::expr e, unordered_map<string, unsigned>& nameCache) : ArgBa
     }
 }
 
-z3::expr_vector Literal::GetInstances(const z3::expr_vector& args) {
-    z3::expr_vector ret(args.ctx());
-    ret.resize(ArgBases.size());
-    for (unsigned i = 0; i < ArgBases.size(); i++) {
-        assert(ArgBases[i]->Z3Expr.has_value());
-        z3::expr e = ArgBases[i]->Z3Expr->substitute(args);
-        ret.set(i, e);
-    }
-    return ret;
-}
-
 string Literal::ToString() const {
     return PropagatorBase::PrettyPrintLiteral(this, 0, nullptr);
 }

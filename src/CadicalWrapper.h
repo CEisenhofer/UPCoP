@@ -1,10 +1,7 @@
 #pragma once
 
 #include "cadical.hpp"
-#include <cassert>
-#include <functional>
-#include <sstream>
-#include <utility>
+#include "utils.h"
 
 #ifndef NDEBUG
 extern std::unordered_map<unsigned, std::string> names;
@@ -113,7 +110,7 @@ class formula_term {
 protected:
 
     formula_manager& manager;
-    int var_id;
+    int var_id = 0;
 
     explicit formula_term(formula_manager& manager) : ast_id(manager.id_to_formula.size()), manager(manager) {
         manager.id_to_formula.push_back(this);
@@ -148,7 +145,7 @@ public:
     // first:  0 -> just create a new variable and return it
     // first:  1 -> inline the variable positively
     // first: -1 -> inline the variable negatively
-    virtual const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::pair<std::vector<int>, formula>>& aux) = 0;
+    virtual const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) = 0;
 
     static std::string string_join(const std::vector<formula_term*>& args, const std::string& sep) {
         assert(!args.empty());
@@ -162,9 +159,6 @@ public:
         sb << ")";
         return sb.str();
     }
-
-    virtual void reset_aux() { }
-    virtual void fix_aux() { }
 };
 
 class literal_term : public formula_term {
@@ -195,7 +189,7 @@ public:
         return name;
     }
 
-    const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::pair<std::vector<int>, formula>>& aux) override;
+    const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) override;
 };
 
 class false_term : public literal_term {
@@ -205,7 +199,7 @@ public:
     std::string to_string() const final { return "false"; }
 
     const literal_term*
-    get_lits(CaDiCalPropagator& propagator, std::vector<std::pair<std::vector<int>, formula>>& aux) final {
+    get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) final {
         return nullptr;
     }
 };
@@ -216,17 +210,13 @@ public:
 
     std::string to_string() const final { return "true"; }
 
-    const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::pair<std::vector<int>, formula>>& aux) final {
+    const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) final {
         return nullptr;
     }
 };
 
 class not_term : public formula_term {
     formula_term* t;
-    struct {
-        unsigned id: 31;
-        unsigned fixed: 1;
-    } auxLit = {0, 0};
     const std::string name;
 
 public:
@@ -237,16 +227,7 @@ public:
         return name;
     }
 
-    const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::pair<std::vector<int>, formula>>& aux) override;
-
-    void reset_aux() final {
-        if (!auxLit.fixed)
-            auxLit.id = 0;
-    }
-
-    void fix_aux() final {
-        auxLit.fixed = 1;
-    }
+    const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) override;
 };
 
 class complex_term : public formula_term {
@@ -254,24 +235,11 @@ class complex_term : public formula_term {
 protected:
 
     const std::vector<formula_term*> args;
-    struct {
-        unsigned id: 31;
-        unsigned fixed: 1;
-    } auxLit = {0, 0};
 
 public:
 
     explicit complex_term(formula_manager& m, std::vector<formula_term*> args) : formula_term(m), args(std::move(args)) {
         assert(this->args.size() > 1);
-    }
-
-    void reset_aux() final {
-        if (!auxLit.fixed)
-            auxLit.id = 0;
-    }
-
-    void fix_aux() final {
-        auxLit.fixed = 1;
     }
 };
 
@@ -286,7 +254,7 @@ public:
         return name;
     }
 
-    const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::pair<std::vector<int>, formula>>& aux) override;
+    const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) override;
 };
 
 class or_term : public complex_term {
@@ -300,7 +268,7 @@ public:
         return name;
     }
 
-    const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::pair<std::vector<int>, formula>>& aux) override;
+    const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) override;
 };
 
 enum tri_state : unsigned char {
@@ -331,8 +299,15 @@ private:
 
     unsigned propagationIdx = 0;
     unsigned propagationReadIdx = 0;
-    std::vector<std::pair<std::vector<int>, formula>> propagations;
+    std::vector<std::vector<int>> propagations;
+
     std::unordered_map<literal, bool, literal_hash, literal_eq> interpretation;
+
+
+    // for persistent propagation
+    std::unordered_set<std::vector<int>> prev_propagations;
+
+protected:
     bool is_conflict = false;
 
 public:
@@ -394,6 +369,7 @@ protected:
     }
 
     void reinit_solver();
+    virtual void reinit_solver2() = 0;
 
 public:
 #ifndef NDEBUG
@@ -417,7 +393,7 @@ protected:
 
     virtual void fixed(literal lit, bool value) = 0;
 
-    void notify_assignment(int lit, bool is_fixed) override;
+    void notify_assignment(const vector<int>& lits) override;
 
     void notify_new_decision_level() override;
 
@@ -431,7 +407,7 @@ protected:
         return 0;
     }
 
-    bool cb_has_external_clause() override;
+    bool cb_has_external_clause(bool& is_forgettable) override;
 
     int cb_add_external_clause_lit() override;
 };
