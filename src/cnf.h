@@ -1,19 +1,19 @@
 #pragma once
-#include "Clause.h"
+#include "clause.h"
 
 template<typename T>
-struct CNF {
+struct cnf {
 
-    static CNF<Clause> GetTrue() {
+    static cnf<clause> GetTrue() {
         return {};
     }
 
-    static CNF<Clause> GetFalse() {
-        return { vector<Clause>(), vector<Clause>{{}} };
+    static cnf<clause> GetFalse() {
+        return {vector<clause>(), vector<clause>{{}} };
     }
 
-    static CNF<Clause> True;
-    static CNF<Clause> False;
+    static cnf<clause> True;
+    static cnf<clause> False;
 
     vector<T> nonConjectureClauses;
     vector<T> conjectureClauses;
@@ -32,14 +32,14 @@ struct CNF {
                conjectureClauses[i - nonConjectureClauses.size()];
     }
 
-    CNF() : nonConjectureClauses(), conjectureClauses() { }
+    cnf() : nonConjectureClauses(), conjectureClauses() { }
 
-    CNF(vector<T> nonConjectureClauses, vector<T> conjectureClauses) :
+    cnf(vector<T> nonConjectureClauses, vector<T> conjectureClauses) :
         nonConjectureClauses(std::move(nonConjectureClauses)), conjectureClauses(std::move(conjectureClauses)) { }
 
-    CNF(vector<T> nonConjectureClauses) : nonConjectureClauses(std::move(nonConjectureClauses)), conjectureClauses() { }
+    cnf(vector<T> nonConjectureClauses) : nonConjectureClauses(std::move(nonConjectureClauses)), conjectureClauses() { }
 
-    CNF(const vector<CNF<T>>& cnfs) : nonConjectureClauses(), conjectureClauses() {
+    cnf(const vector<cnf<T>>& cnfs) : nonConjectureClauses(), conjectureClauses() {
         unsigned conjSum = 0, nonConjSum = 0;
         for (auto& cnf : cnfs) {
             conjSum += cnf.conjectureClauses.size();
@@ -52,7 +52,7 @@ struct CNF {
         }
     }
 
-    inline bool IsConjecture(unsigned idx) const {
+    inline bool is_conjecture(unsigned idx) const {
         return idx >= nonConjectureClauses.size();
     }
 

@@ -1,26 +1,26 @@
-#include "PropagatorBase.h"
+#include "propagator_base.h"
 #include <iostream>
 
-unsigned PropagatorBase::getRandom(unsigned min, unsigned max) const {
+unsigned propagator_base::getRandom(unsigned min, unsigned max) const {
     assert(max > min);
     unsigned res = distribution(generator);
     unsigned span = max - min;
     return min + res % span;
 }
 
-PropagatorBase::PropagatorBase(CNF<IndexedClause*>& cnf, ComplexADTSolver& adtSolver, ProgParams& progParams, unsigned literalCnt)
+propagator_base::propagator_base(cnf<indexed_clause*>& cnf, ComplexADTSolver& adtSolver, ProgParams& progParams, unsigned literalCnt)
     : term_solver(adtSolver), generator(0), progParams(progParams), matrix(cnf), UnificationHints(literalCnt) {
 
     term_solver.propagator = this;
 
-    pvector<IndexedClause> posClauses;
-    pvector<IndexedClause> negClauses;
+    pvector<indexed_clause> posClauses;
+    pvector<indexed_clause> negClauses;
     posClauses.reserve(cnf.size());
     negClauses.reserve(cnf.size());
 
     for (unsigned i = 0; i < cnf.size(); i++) {
         auto* clause = cnf[i];
-        if (cnf.IsConjecture(i))
+        if (cnf.is_conjecture(i))
             initClauses.push_back(clause);
         bool allPos = true;
         bool allNeg = true;
@@ -67,20 +67,20 @@ PropagatorBase::PropagatorBase(CNF<IndexedClause*>& cnf, ComplexADTSolver& adtSo
     assert(!initClauses.empty());
 }
 
-Large2DArray::Large2DArray(unsigned size) : size(size) {
+large_array::large_array(unsigned size) : size(size) {
     if (size < (1 << 14)) {
-        small = make_optional(pvector<const SubtermHint>());
+        small = make_optional(pvector<const subterm_hint>());
         small->resize((size_t)size * size);
         large = nullopt;
     } else {
         small = nullopt;
-        large = make_optional(unordered_map<pair<unsigned, unsigned>, const SubtermHint*>(14591 /* some large prime */));
+        large = make_optional(unordered_map<pair<unsigned, unsigned>, const subterm_hint*>(14591 /* some large prime */));
     }
 }
 
-Large2DArray::~Large2DArray() {
+large_array::~large_array() {
     if (small.has_value()) {
-        for (const SubtermHint* r: small.value()) {
+        for (const subterm_hint* r: small.value()) {
             if (r != nullptr && !is_invalid(r))
                 delete r;
         }
@@ -92,16 +92,16 @@ Large2DArray::~Large2DArray() {
     }
 }
 
-const SubtermHint* Large2DArray::get(unsigned i, unsigned j) const {
+const subterm_hint* large_array::get(unsigned i, unsigned j) const {
     if (small.has_value())
         return (*small)[i * size + j];
-    const SubtermHint* res;
+    const subterm_hint* res;
     if (tryGetValue(*large, make_pair(i, j), res))
         return res;
     return nullptr;
 }
 
-void Large2DArray::set(unsigned i, unsigned j, const SubtermHint* hint) {
+void large_array::set(unsigned i, unsigned j, const subterm_hint* hint) {
     if (small.has_value()) {
         assert((*small)[i * size + j] == nullptr);
         (*small)[i * size + j] = hint;
@@ -111,10 +111,10 @@ void Large2DArray::set(unsigned i, unsigned j, const SubtermHint* hint) {
     large->insert(make_pair(make_pair(i, j), hint));
 }
 
-void SubtermHint::GetPosConstraints(PropagatorBase& propagator, const GroundLiteral& l1, const GroundLiteral& l2, vector<formula>& constraints) const {
+void subterm_hint::GetPosConstraints(propagator_base& propagator, const ground_literal& l1, const ground_literal& l2, vector<formula>& constraints) const {
     auto [lhsCpy, rhsCpy] = GetCpyIdx(l1, l2);
     for (auto [lhs, rhs]: equalities) {
-        formula e = propagator.term_solver.MakeEqualityExpr(lhs, lhsCpy, rhs, rhsCpy);
+        formula e = propagator.term_solver.MakeEqualityExpr(lhs->GetInstance(lhsCpy), rhs->GetInstance(rhsCpy));
         if (e->is_false()) {
             constraints.resize(0);
             constraints.push_back(propagator.m.mk_false());
@@ -126,11 +126,11 @@ void SubtermHint::GetPosConstraints(PropagatorBase& propagator, const GroundLite
     }
 }
 
-formula SubtermHint::GetNegConstraints(PropagatorBase& propagator, const GroundLiteral& l1, const GroundLiteral& l2) const {
+formula subterm_hint::GetNegConstraints(propagator_base& propagator, const ground_literal& l1, const ground_literal& l2) const {
     auto [lhsCpy, rhsCpy] = GetCpyIdx(l1, l2);
     pvector<formula_term> orList;
     for (const auto& [lhs, rhs] : equalities) {
-        formula e = propagator.term_solver.MakeEqualityExpr(lhs, lhsCpy, rhs, rhsCpy);
+        formula e = propagator.term_solver.MakeEqualityExpr(lhs->GetInstance(lhsCpy), rhs->GetInstance(rhsCpy));
         if (e->is_false())
             return propagator.m.mk_true();
         if (e->is_true())
@@ -140,23 +140,23 @@ formula SubtermHint::GetNegConstraints(PropagatorBase& propagator, const GroundL
     return propagator.m.mk_or(orList);
 }
 
-bool SubtermHint::IsSatisfied(const GroundLiteral& l1, const GroundLiteral& l2) const {
+bool subterm_hint::IsSatisfied(const ground_literal& l1, const ground_literal& l2) const {
     auto [lhsCpy, rhsCpy] = GetCpyIdx(l1, l2);
     for (const auto& [lhs, rhs]: equalities) {
-        if (!ComplexADTSolver::AreEqual(lhs, lhsCpy, rhs, rhsCpy))
+        if (!ComplexADTSolver::AreEqual(lhs->GetInstance(lhsCpy), rhs->GetInstance(rhsCpy)))
             return false;
     }
     return true;
 }
 
-SubtermHint* PropagatorBase::CollectConstrainUnifiable(const GroundLiteral& l1, const IndexedLiteral& l2) const {
+subterm_hint* propagator_base::CollectConstrainUnifiable(const ground_literal& l1, const indexed_literal& l2) const {
     // l1 has to be ground; otw. P(:auto 0) [l1] and P(:auto 0) [l2] would say that they are always equal
-    auto* hint = new SubtermHint();
+    auto* hint = new subterm_hint();
     unsigned arity = l1.GetArity();
 
     for (unsigned i = 0; i < arity; i++) {
-        Term* lhs = l1.Literal->ArgBases[i];
-        Term* rhs = l2.ArgBases[i];
+        term* lhs = l1.Literal->arg_bases[i];
+        term* rhs = l2.arg_bases[i];
         if (!lhs->SeemsPossiblyUnifiable(rhs, *hint)) {
             delete hint;
             return nullptr;
@@ -165,10 +165,10 @@ SubtermHint* PropagatorBase::CollectConstrainUnifiable(const GroundLiteral& l1, 
     return hint;
 }
 
-void PropagatorBase::CacheUnification(const GroundLiteral& l1, const IndexedLiteral& l2) {
+void propagator_base::CacheUnification(const ground_literal& l1, const indexed_literal& l2) {
     if (UnificationHints.get(l1.Literal->Index, l2.Index) != nullptr)
         return;
-    SubtermHint* hint;
+    subterm_hint* hint;
     if (l1.Literal->nameID == l2.nameID &&
         (hint = CollectConstrainUnifiable(l1, l2)) != nullptr) {
 
@@ -183,7 +183,7 @@ void PropagatorBase::CacheUnification(const GroundLiteral& l1, const IndexedLite
     }
 }
 
-void PropagatorBase::CreateTautologyConstraints(IndexedClause& clause) {
+void propagator_base::CreateTautologyConstraints(indexed_clause& clause) {
     /*
     clause.TautologyConstraints.emplace();
     auto ground = GetRootGround(clause);
@@ -206,8 +206,8 @@ void PropagatorBase::CreateTautologyConstraints(IndexedClause& clause) {
     }*/
 }
 
-void PropagatorBase::fixed(literal var, bool value) {
-    if (is_conflict)
+void propagator_base::fixed(literal var, bool value) {
+    if (is_conflict_flag)
         return;
     try {
         if (term_solver.Asserted(var, value))
@@ -221,8 +221,8 @@ void PropagatorBase::fixed(literal var, bool value) {
     }
 }
 
-string PropagatorBase::ClauseToString(const vector<GroundLiteral>& ground,
-                                        unordered_map<variableIdentifier, string>* prettyNames) {
+string propagator_base::ClauseToString(const vector<ground_literal>& ground,
+                                       unordered_map<term_instance*, string>* prettyNames) {
     if (ground.empty())
         return "false";
     if (ground.size() == 1)
@@ -236,8 +236,8 @@ string PropagatorBase::ClauseToString(const vector<GroundLiteral>& ground,
     return sb.str();
 }
 
-string PropagatorBase::PrettyPrintLiteral(const Literal* l, unsigned cpyIdx,
-                                            unordered_map<variableIdentifier, string>* prettyNames) {
+string propagator_base::PrettyPrintLiteral(const fo_literal* l, unsigned cpyIdx,
+                                           unordered_map<term_instance*, string>* prettyNames) {
     stringstream sb;
     if (!l->polarity)
         sb << "not ";
@@ -245,9 +245,9 @@ string PropagatorBase::PrettyPrintLiteral(const Literal* l, unsigned cpyIdx,
     if (l->Arity() == 0)
         return sb.str();
     sb << '(';
-    sb << l->ArgBases[0]->PrettyPrint(cpyIdx, prettyNames);
+    sb << l->arg_bases[0]->PrettyPrint(cpyIdx, prettyNames);
     for (int i = 1; i < l->Arity(); i++) {
-        sb << ", " << l->ArgBases[i]->PrettyPrint(cpyIdx, prettyNames);
+        sb << ", " << l->arg_bases[i]->PrettyPrint(cpyIdx, prettyNames);
     }
     sb << ')';
     return sb.str();

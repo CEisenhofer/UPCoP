@@ -32,10 +32,10 @@ bool std::equal_to<std::vector<formula_term*>>::operator()(const std::vector<for
     return true;
 }
 
-void CaDiCalPropagator::propagate_conflict(std::vector<literal> just) {
-    if (is_conflict)
+void CaDiCal_propagator::propagate_conflict(std::vector<literal> just) {
+    if (is_conflict_flag)
         return;
-    is_conflict = true;
+    is_conflict_flag = true;
 #ifndef NDEBUG
     Log("Conflict: ");
     for (unsigned i = 0; i < just.size(); i++) {
@@ -58,8 +58,8 @@ void CaDiCalPropagator::propagate_conflict(std::vector<literal> just) {
     propagations.emplace_back(std::move(j));
 }
 
-void CaDiCalPropagator::propagate(const std::vector<literal>& just, formula_term* prop) {
-    if (is_conflict)
+void CaDiCal_propagator::propagate(const std::vector<literal>& just, formula prop) {
+    if (is_conflict_flag)
         return;
     assert(!prop->is_true());
     if (prop->is_false())
@@ -100,11 +100,11 @@ void CaDiCalPropagator::propagate(const std::vector<literal>& just, formula_term
     prev_propagations.insert(aux.back());
 }
 
-void CaDiCalPropagator::reinit_solver() {
+void CaDiCal_propagator::reinit_solver() {
     bool first = solver == nullptr;
     solver = new CaDiCaL::Solver();
-    solver->set("ilb", false);
-    solver->set("ilbassumptions", false);
+    solver->set("ilb", 0);
+    solver->set("ilbassumptions", 0);
     solver->connect_external_propagator(this);
 
     if (first)
@@ -124,12 +124,12 @@ void CaDiCalPropagator::reinit_solver() {
     }
 
     prev_propagations.clear();
-    is_conflict = false;
+    is_conflict_flag = false;
 
     reinit_solver2();
 }
 
-void CaDiCalPropagator::notify_assignment(const vector<int>& lits) {
+void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
     for (int lit : lits) {
         bool value = lit > 0;
 
@@ -144,12 +144,12 @@ void CaDiCalPropagator::notify_assignment(const vector<int>& lits) {
         });
 
         fixed(v, value);
-        if (is_conflict)
+        if (is_conflict_flag)
             return;
     }
 }
 
-void CaDiCalPropagator::notify_new_decision_level() {
+void CaDiCal_propagator::notify_new_decision_level() {
     assert(propagationReadIdx == 0);
     LogN("Push");
     undoStackSize.push_back(undoStack.size());
@@ -157,10 +157,10 @@ void CaDiCalPropagator::notify_new_decision_level() {
     assert(propagations.size() == propagationIdx);
 }
 
-void CaDiCalPropagator::notify_backtrack(size_t new_level) {
+void CaDiCal_propagator::notify_backtrack(size_t new_level) {
     assert(propagationReadIdx == 0);
     LogN("Pop: " << (undoStackSize.size() - new_level));
-    is_conflict = false;
+    is_conflict_flag = false;
     const unsigned prev = undoStackSize[new_level];
     undoStackSize.resize(new_level);
     while (undoStack.size() > prev) {
@@ -169,18 +169,18 @@ void CaDiCalPropagator::notify_backtrack(size_t new_level) {
     }
 }
 
-bool CaDiCalPropagator::cb_check_found_model(const std::vector<int>& model) {
+bool CaDiCal_propagator::cb_check_found_model(const std::vector<int>& model) {
     assert(propagationReadIdx == 0);
-    assert(!is_conflict);
+    assert(!is_conflict_flag);
     final();
     return propagations.size() == propagationIdx;
 }
 
-bool CaDiCalPropagator::cb_has_external_clause(bool& is_forgettable) {
+bool CaDiCal_propagator::cb_has_external_clause(bool& is_forgettable) {
     return propagationIdx < propagations.size();
 }
 
-int CaDiCalPropagator::cb_add_external_clause_lit() {
+int CaDiCal_propagator::cb_add_external_clause_lit() {
 #ifndef NDEBUG
     bool f = false;
     assert(cb_has_external_clause(f));
@@ -199,11 +199,11 @@ int CaDiCalPropagator::cb_add_external_clause_lit() {
     return toAdd[propagationReadIdx++];
 }
 
-const literal_term* literal_term::get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) {
+const literal_term* literal_term::get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) {
     return this;
 }
 
-const literal_term* not_term::get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) {
+const literal_term* not_term::get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) {
     assert(!t->is_true() && !t->is_false());
     if (var_id != 0)
         return manager.mk_lit(var_id);
@@ -214,7 +214,7 @@ const literal_term* not_term::get_lits(CaDiCalPropagator& propagator, std::vecto
     return manager.mk_lit(var_id);
 }
 
-const literal_term* and_term::get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) {
+const literal_term* and_term::get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) {
     if (var_id != 0)
         return manager.mk_lit(var_id);
     assert(args.size() > 1);
@@ -238,7 +238,7 @@ const literal_term* and_term::get_lits(CaDiCalPropagator& propagator, std::vecto
     return manager.mk_lit(var_id);
 }
 
-const literal_term* or_term::get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) {
+const literal_term* or_term::get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) {
     if (var_id != 0)
         return manager.mk_lit(var_id);
     assert(args.size() > 1);

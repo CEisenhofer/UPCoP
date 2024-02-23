@@ -1,7 +1,7 @@
 ﻿#include "matrix_propagator.h"
 
-matrix_propagator::matrix_propagator(CNF<IndexedClause*>& cnf, ComplexADTSolver& adtSolver, ProgParams& progParams, unsigned literalCnt) :
-        PropagatorBase(cnf, adtSolver, progParams, literalCnt), lvl(progParams.StartDepth) {
+matrix_propagator::matrix_propagator(cnf<indexed_clause*>& cnf, ComplexADTSolver& adtSolver, ProgParams& progParams, unsigned literalCnt) :
+        propagator_base(cnf, adtSolver, progParams, literalCnt), lvl(progParams.StartDepth) {
 
     assert(progParams.Mode == Rectangle || progParams.Mode == Core);
 
@@ -9,13 +9,13 @@ matrix_propagator::matrix_propagator(CNF<IndexedClause*>& cnf, ComplexADTSolver&
     if (progParams.Mode == Core) {
         priority.resize(cnf.size());
 
-        for (int i = 0; i < cnf.size(); i++) {
-            if (cnf.IsConjecture(i))
+        for (unsigned i = 0; i < cnf.size(); i++) {
+            if (cnf.is_conjecture(i))
                 multiplicity[i] = 1;
         }
     }
     else {
-        for (int i = 0; i < cnf.size(); i++) {
+        for (unsigned i = 0; i < cnf.size(); i++) {
             multiplicity[i] = lvl;
         }
     }
@@ -90,7 +90,7 @@ void matrix_propagator::next_level_core(bool first) {
     else {
         for (int c = 0; c < matrix.size(); c++) {
             priority[c] = 0;
-            if (matrix.IsConjecture(c)) {
+            if (matrix.is_conjecture(c)) {
                 GetGround(matrix[c], 0);
                 multiplicity[c] = 1;
             }
@@ -108,8 +108,8 @@ void matrix_propagator::next_level_core(bool first) {
     }
 }
 
-clause_instance* matrix_propagator::GetClauseInstanceInfo(const IndexedClause* clause, unsigned cpyIdx, literal_term* selector) {
-    vector<GroundLiteral> instances;
+clause_instance* matrix_propagator::get_clause_instance(const indexed_clause* clause, unsigned cpyIdx, literal selector) {
+    vector<ground_literal> instances;
     instances.reserve(clause->literals.size());
     for (auto* lit : clause->literals) {
         instances.emplace_back(lit, cpyIdx);
@@ -117,19 +117,19 @@ clause_instance* matrix_propagator::GetClauseInstanceInfo(const IndexedClause* c
     return new clause_instance(clause, cpyIdx, selector, std::move(instances));
 }
 
-bool matrix_propagator::AreConnected(const GroundLiteral& l1, const GroundLiteral& l2) {
+bool matrix_propagator::are_connected(const ground_literal& l1, const ground_literal& l2) {
     if (l1.Literal->polarity == l2.Literal->polarity || l1.GetArity() != l2.GetArity())
         return false;
     const auto* unification = UnificationHints.get(l1.Literal->Index, l2.Literal->Index);
     assert(unification != nullptr);
-    if (Large2DArray::is_invalid(unification))
+    if (large_array::is_invalid(unification))
         return false;
     bool res = unification->IsSatisfied(l1, l2);
     assert(res == UnificationHints.get(l2.Literal->Index, l1.Literal->Index)->IsSatisfied(l2, l1));
     return res;
 }
 
-void matrix_propagator::CheckProof(z3::solver& uniSolver, const vector<clause_instance*>& chosen) {
+void matrix_propagator::check_proof(z3::solver& uniSolver, const vector<clause_instance*>& chosen) {
     if (!progParams.CheckProof)
         return;
 
@@ -160,11 +160,11 @@ void matrix_propagator::CheckProof(z3::solver& uniSolver, const vector<clause_in
 #endif
 }
 
-clause_instance* matrix_propagator::GetGround(const IndexedClause* clause, unsigned int cpy) {
+clause_instance* matrix_propagator::GetGround(const indexed_clause* clause, unsigned int cpy) {
     auto& instances = cachedClauses[clause->Index];
     for (unsigned i = instances.size(); i <= cpy; i++) {
         literal selector = m.mk_lit(new_observed_var("select#" + to_string(clause->Index) + "@" + to_string(i)));
-        auto* info = GetClauseInstanceInfo(clause, i, selector);
+        auto* info = get_clause_instance(clause, i, selector);
         instances.push_back(info);
         allClauses.push_back(info);
         assert(!contains_key(exprToInfo, selector));
@@ -174,7 +174,7 @@ clause_instance* matrix_propagator::GetGround(const IndexedClause* clause, unsig
     return instances[cpy];
 }
 
-void matrix_propagator::AssertRoot() {
+void matrix_propagator::assert_root() {
     for (unsigned i = 0; i < initClauses.size(); i++) {
         solver->add(GetGround(initClauses[i], 0)->selector->get_lit());
     }
@@ -269,7 +269,7 @@ void matrix_propagator::fixed2(literal_term* e, bool value) {
     pb_clause_limit();
 }
 
-formula_term* matrix_propagator::ConnectLiteral(clause_instance* info, const GroundLiteral& lit) {
+formula_term* matrix_propagator::connect_literal(clause_instance* info, const ground_literal& lit) {
     // TODO: Only propagate the 0th copy if the clause is ground
     vector<formula> exprs;
     for (auto& cachedClause : cachedClauses) {
@@ -280,11 +280,11 @@ formula_term* matrix_propagator::ConnectLiteral(clause_instance* info, const Gro
         for (int j = 0; j < literalCnt; j++) {
             // TODO: Only iterate over the relevant ones
             CacheUnification(lit, cachedClause[0]->literals[j]);
-            const SubtermHint* unification = UnificationHints.get(
+            const subterm_hint* unification = UnificationHints.get(
                     lit.Literal->Index,
                     cachedClause[0]->literals[j].Literal->Index);
 
-            if (Large2DArray::is_invalid(unification) ||
+            if (large_array::is_invalid(unification) ||
                 lit.Literal->polarity == cachedClause[0]->literals[j].Literal->polarity)
                 continue;
 
@@ -303,8 +303,8 @@ formula_term* matrix_propagator::ConnectLiteral(clause_instance* info, const Gro
         for (int i = 0; i < matrix.size(); i++) {
             for (int j = 0; j < matrix[i]->size(); j++) {
                 CacheUnification(lit, *matrix[i]->literals[j]);
-                const SubtermHint* unification = UnificationHints.get(lit.Literal->Index, matrix[i]->literals[j]->Index);
-                if (Large2DArray::is_invalid(unification) || lit.Literal->polarity == matrix[i]->literals[j]->polarity)
+                const subterm_hint* unification = UnificationHints.get(lit.Literal->Index, matrix[i]->literals[j]->Index);
+                if (large_array::is_invalid(unification) || lit.Literal->polarity == matrix[i]->literals[j]->polarity)
                     continue;
                 if (!cachedClauses[i].empty() && matrix[i]->Ground) {
                     assert(cachedClauses[i].size() == 1);
@@ -350,27 +350,53 @@ void matrix_propagator::final() {
     for (int i = 0; i < chosen.size(); i++) {
         justifications.push_back(chosen[i]->selector);
     }
-    if (progParams.Mode == Core) {
-        // TODO:
-        throw solving_exception("TODO");
-        for (auto& p : chosen) {
-            if (p->copy_idx == multiplicity[p->clause->Index] - 1 && !p->clause->Ground) {
-                justifications.push_back(clauseLimitListExpr[p->clause->Index]);
-            }
-        }
-    }
+
     for (auto& path : paths) {
         vector<formula> constraints;
         for (int i = 0; i < path.size(); i++) {
             for (int j = i + 1; j < path.size(); j++) {
-                assert(!AreConnected(path[i].lit, path[j].lit));
+                assert(!are_connected(path[i].lit, path[j].lit));
                 vector<formula> unificationConstraint;
                 const auto* unification = UnificationHints.get(path[i].lit.Literal->Index, path[j].lit.Literal->Index);
                 assert(unification != nullptr);
-                if (!Large2DArray::is_invalid(unification) && path[i].lit.Literal->polarity != path[j].lit.Literal->polarity) {
+                if (!large_array::is_invalid(unification) && path[i].lit.Literal->polarity != path[j].lit.Literal->polarity) {
                     unification->GetPosConstraints(*this, path[i].lit, path[j].lit, unificationConstraint);
                     if (!unificationConstraint.empty())
                         constraints.push_back(m.mk_and(unificationConstraint));
+                }
+            }
+        }
+
+        if (progParams.Mode == Core) {
+            for (auto elem: path) {
+                for (auto& cachedClause: cachedClauses) {
+                    if (cachedClause.empty())
+                        continue;
+                    unsigned literalCnt = cachedClause[0]->literals.size();
+                    for (int j = 0; j < literalCnt; j++) {
+                        CacheUnification(elem.lit, cachedClause[0]->literals[j]);
+                        const subterm_hint* unification = UnificationHints.get(
+                                elem.lit.Literal->Index,
+                                cachedClause[0]->literals[j].Literal->Index);
+
+                        if (large_array::is_invalid(unification) ||
+                            elem.lit.Literal->polarity == cachedClause[0]->literals[j].Literal->polarity)
+                            continue;
+
+                        unsigned maxId = 0;
+                        for (; maxId < cachedClause.size(); maxId++) {
+                            if (cachedClause[maxId]->value != undef)
+                                break;
+                        }
+                        if (maxId >= cachedClause.size()) {
+                            constraints.push_back(clauseLimitListExpr[cachedClause[0]->clause->Index]);
+                        }
+                        else {
+                            vector<formula> constraints = {cachedClause[maxId]->selector};
+                            unification->GetPosConstraints(*this, elem.lit, cachedClause[maxId]->literals[j], constraints);
+                            constraints.push_back(m.mk_and(constraints));
+                        }
+                    }
                 }
             }
         }
@@ -389,7 +415,7 @@ void matrix_propagator::FindPath(int clauseIdx, const vector<clause_instance*>& 
 #ifndef NDEBUG
         for (int i = 0; i < path.size(); i++) {
             for (int j = i + 1; j < path.size(); j++) {
-                assert(!AreConnected(path[i].lit, path[j].lit));
+                assert(!are_connected(path[i].lit, path[j].lit));
             }
         }
 #endif
@@ -411,7 +437,7 @@ void matrix_propagator::FindPath(int clauseIdx, const vector<clause_instance*>& 
         bool failed = false;
 
         for (const path_element& elem : path) {
-            if (AreConnected(l1, elem.lit)) {
+            if (are_connected(l1, elem.lit)) {
                 failed = true;
                 break;
             }

@@ -1,75 +1,34 @@
 #pragma once
-#include "Term.h"
+#include "term.h"
 
-struct PropagatorBase;
-
-struct equalityPair {
-    const Term* lhs;
-    const Term* rhs;
-    unsigned lhsCpy;
-    unsigned rhsCpy;
-
-    equalityPair(const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy) : lhs(lhs), rhs(rhs), lhsCpy(lhsCpy), rhsCpy(rhsCpy) { }
-
-    inline bool operator==(const equalityPair& other) const {
-        return lhs == other.lhs && rhs == other.rhs && lhsCpy == other.lhsCpy && rhsCpy == other.rhsCpy;
-    }
-
-    inline bool operator!=(const equalityPair& other) const {
-        return !this->operator==(other);
-    }
-
-    inline string to_string() const {
-        return "<" + lhs->to_string() + "#" + std::to_string(lhsCpy) + " = " + rhs->to_string() + "#" + std::to_string(rhsCpy) + ">";
-    }
-};
-
-struct LazySubDiseq : public equalityPair{
-    bool processed;
-
-    LazySubDiseq() : equalityPair(nullptr, 0, nullptr, 0), processed(false) { }
-
-    LazySubDiseq(const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy) : equalityPair(lhs, lhsCpy, rhs, rhsCpy), processed(false) { }
-
-    inline string ToString() const {
-        return lhs->to_string() + "#" + std::to_string(lhsCpy) + " != " + rhs->to_string() + "#" + std::to_string(rhsCpy);
-    }
-};
-
-
-namespace std {
-    template <>
-    struct hash<equalityPair> {
-        size_t operator()(const equalityPair& x) const;
-    };
-}
+struct propagator_base;
 
 class ComplexADTSolver {
 
     vector<string> SortNames;
 
     unordered_map<string, SimpleADTSolver*> nameToSolver;
-    unordered_map<literal, equalityPair> exprToEq;
-    unordered_map<equalityPair, literal> eqToExpr;
-    unordered_map<literal, Term*> exprToTerm;
+    unordered_map<literal, equality> exprToEq;
+    unordered_map<literal, lessThan> exprToLess;
+    unordered_map<equality, literal> eqToExpr;
+    unordered_map<lessThan, literal> lessToExpr;
+
     unordered_map<literal, bool> interpretation;
 
 public:
 
     vector<SimpleADTSolver*> Solvers;
 
-    const bool SATSplit;
-    PropagatorBase* propagator = nullptr;
+    propagator_base* propagator = nullptr;
 
     inline unsigned getSortCnt() const {
         return SortNames.size();
     }
 
-    ComplexADTSolver() = delete;
+    ComplexADTSolver() = default;
+
     ComplexADTSolver(ComplexADTSolver&) = delete;
     ComplexADTSolver& operator=(ComplexADTSolver&) = delete;
-
-    ComplexADTSolver(bool z3Split);
 
     ~ComplexADTSolver();
 
@@ -83,41 +42,31 @@ public:
 
     bool Asserted(literal e, bool isTrue);
 
-    bool Asserted(literal e, const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy, bool isTrue);
+    bool Asserted(literal e, term_instance* lhs, term_instance* rhs, bool isTrue) const;
 
-    literal MakeEqualityExpr(const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy);
+    literal MakeEqualityExpr(term_instance* lhs, term_instance* rhs);
+    literal MakeDisEqualityExpr(term_instance* lhs, term_instance* Rhs);
 
-    literal MakeDisEqualityExpr(const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy);
+    literal MakeLessExpr(term_instance* lhs, term_instance* rhs);
+    literal MakeGreaterEqExpr(term_instance* lhs, term_instance* rhs);
+
+    literal MakeLessEqExpr(term_instance* lhs, term_instance* rhs) {
+        return MakeGreaterEqExpr(rhs, lhs);
+    }
+    literal MakeGreaterExpr(term_instance* lhs, term_instance* rhs) {
+        return MakeLessExpr(rhs, lhs);
+    }
 
     void PeekTerm(const string& solver, const string& name, int argCnt);
 
-    static bool AreEqual(const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy);
-
-    string GetModel() const;
-
-    void MakeZ3ADT(z3::context& ctx);
-
-    inline bool GetEq(literal l, equalityPair& value) {
-        return tryGetValue(exprToEq, l, value);
-    }
-
-    z3::sort& GetZ3Sort(const string& name);
-};
-
-struct LazyDiseq {
-    vector<LazySubDiseq> SubDisequalities;
-    unsigned IrrelevantDisequalitiesCnt;
-    vector<literal> Justifications;
-    bool Solved;
-
-    LazyDiseq() : SubDisequalities(), IrrelevantDisequalitiesCnt(0), Justifications(), Solved(false) { }
+    static bool AreEqual(term_instance* lhs, term_instance* rhs);
 };
 
 struct SimpleADTSolver {
 
     ComplexADTSolver& ComplexSolver;
 
-    inline PropagatorBase& propagator() const {
+    inline propagator_base& propagator() const {
         return *ComplexSolver.propagator;
     }
 
@@ -128,57 +77,65 @@ struct SimpleADTSolver {
     vector<string> VarNames;
 
     unordered_map<string, int> nameToId;
-    unordered_map<RawTermWrapper, Term*> hashCon;
-
-    // substitution[v][i] means that copy i of variable v is mapped to copy cpy of term subst with justification just
-    vector<pvector<substitution>> substitutionList;
-    // List of all disequalities that could not be eliminated instantly.
-    // Each disequality consists of sub-disequalities
-    pvector<LazyDiseq> diseqList;
-    vector<vector<unordered_set<unsigned>>> observerList; // observe lazy disequalities per variable and cpy
+    unordered_map<RawTermWrapper, term*> hashCon;
 
     SimpleADTSolver(ComplexADTSolver& complexSolver, unsigned id) : ComplexSolver(complexSolver), SolverId(id) { }
 
     ~SimpleADTSolver();
 
-    string PrettyPrint(const Term* t, unsigned cpyIdx, unordered_map<variableIdentifier, string>* prettyNames) const;
+private:
 
-    void EnsureFounded();
+    void Conflict(const vector<Justification*>& just);
+    void Propagate(const vector<Justification*>& just, formula prop);
 
-    bool GetSubstitution(int id, unsigned cpy, substitution*& t);
+public:
 
-    bool SetSubstitution(int id, unsigned cpy, const Term* subst, unsigned substCpy, vector<literal>& just, bool probe);
+    string PrettyPrint(const term* t, unsigned cpyIdx, unordered_map<term_instance*, string>* prettyNames) const;
 
     int PeekTerm(const string& name, unsigned argCnt);
     int PeekTerm(const string& name, vector<unsigned> domain);
 
-    inline Term* MakeTerm(const string& name, const pvector<Term>& args) {
+    inline term* MakeTerm(const string& name, const pvector<term>& args) {
         return MakeTerm(PeekTerm(name, args.size()), args);
     }
 
-    Term* MakeTerm(int id, const pvector<Term>& args);
-    Term* MakeTermInternal(int id, const pvector<Term>& args);
-    Term* MakeVar(const string& name);
-    Term* MakeVar(int idx);
+    term* MakeTerm(int id, const pvector<term>& args);
+    term* MakeTermInternal(int id, const pvector<term>& args);
+    term* MakeVar(const string& name);
+    term* MakeVar(int idx);
 
     inline int GetId(const string& name) const {
         return nameToId.at(name);
     }
 
-    bool Unify(literal just, const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy) {
-        vector<literal> justList;
-        justList.push_back(just);
-        return Unify(lhs, lhsCpy, rhs, rhsCpy, justList);
-    }
-    bool Unify(const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy, vector<literal>& justifications);
-    bool CheckCycle(const RawTerm* t, unsigned cpy, int assignmentId, unsigned assignmentCpyId, vector<literal>& justifications);
-    bool AreEqual(const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy);
-    bool NonUnify(literal just, const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy);
-    bool NonUnify(bool skipRoot, const Term* lhs, unsigned lhsCpy, const Term* rhs, unsigned rhsCpy,
-                  vector<literal>& justifications, vector<LazySubDiseq>& delayed, vector<observerItem>& observerUpdates);
+private:
 
-    string ToString() const;
+    bool UpdateDiseq(term_instance* b, term_instance* newRoot, bool probe);
+    bool UpdateIneq(term_instance* newRoot);
 
-    optional<term_instance> GetModel(int varId, unsigned copyIdx) const;
-    string GetModel();
+public:
+    bool Unify(literal just, term_instance* lhs, term_instance* rhs);
+    bool NonUnify(literal just, term_instance* lhs, term_instance* rhs);
+    bool Less(literal just, term_instance* lhs, term_instance* rhs, bool eq);
+
+    bool AreEqual(term_instance* lhs, term_instance* rhs);
+
+private:
+
+    bool Unify(term_instance* lhs, term_instance* rhs, vector<Justification*>& justifications);
+    z3::check_result NonUnify(Lazy& lazy, bool probe);
+
+
+    bool CheckCycle(term_instance* inst, vector<Justification*>& justifications, bool probe);
+    bool CheckCycle(term_instance* inst, term_instance* search, vector<Justification*>& justifications, bool probe);
+    bool Check(term_instance* start, term_instance* current, bool eq, vector<Justification*>& just, vector<term_instance*>& path, bool smaller);
+
+
+    bool AddRoot(term_instance* b, term_instance* newRoot, bool probe, bool incIneq = true);
+    bool MergeRoot(term_instance* r1, term_instance* r2, equality& eq, bool probe, bool incIneq = true);
+
+public:
+    static void FindJust(term_instance* n1, term_instance* n2, vector<Justification*>& minimalJust);
+
+    string to_string() const;
 };

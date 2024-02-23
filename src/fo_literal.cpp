@@ -1,6 +1,6 @@
-#include "PropagatorBase.h"
+#include "propagator_base.h"
 
-Literal::Literal(z3::expr e, unordered_map<string, unsigned>& nameCache) : ArgBases(), InitExprs({ e.ctx() }) {
+fo_literal::fo_literal(z3::expr e, unordered_map<string, unsigned>& nameCache) : arg_bases(), InitExprs({e.ctx() }) {
     if (e.is_not()) {
         polarity = false;
         e = e.arg(0);
@@ -19,6 +19,6 @@ Literal::Literal(z3::expr e, unordered_map<string, unsigned>& nameCache) : ArgBa
     }
 }
 
-string Literal::ToString() const {
-    return PropagatorBase::PrettyPrintLiteral(this, 0, nullptr);
+string fo_literal::ToString() const {
+    return propagator_base::PrettyPrintLiteral(this, 0, nullptr);
 }

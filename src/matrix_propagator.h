@@ -1,27 +1,27 @@
 #pragma once
-#include "PropagatorBase.h"
+#include "propagator_base.h"
 
 struct path_element {
-    const IndexedClause& clause;
+    const indexed_clause& clause;
     int cpy;
-    const GroundLiteral lit;
+    const ground_literal lit;
 
-    path_element(const IndexedClause& clause, int cpy, const GroundLiteral& lit) : clause(clause), cpy(cpy), lit(lit) {}
+    path_element(const indexed_clause& clause, int cpy, const ground_literal& lit) : clause(clause), cpy(cpy), lit(lit) {}
 };
 
 struct clause_instance {
-    const IndexedClause* clause;
+    const indexed_clause* clause;
     const unsigned copy_idx;
     const literal selector;
     bool propagated;
     tri_state value;
-    const vector<GroundLiteral> literals;
+    const vector<ground_literal> literals;
 
     clause_instance() = delete;
     clause_instance(clause_instance& other) = delete;
     auto operator=(clause_instance& other) = delete;
 
-    clause_instance(const IndexedClause* clause, unsigned copyIdx, literal selectionExpr, vector<GroundLiteral> literals) :
+    clause_instance(const indexed_clause* clause, unsigned copyIdx, literal selectionExpr, vector<ground_literal> literals) :
             clause(clause), copy_idx(copyIdx), selector(selectionExpr), propagated(false), value(undef), literals(std::move(literals)) { }
 
     /*vector<literal> GetVariables(PropagatorBase& propagator, DatatypeSort[] sorts) {
@@ -36,7 +36,7 @@ struct clause_instance {
     string to_string() const { return std::to_string(copy_idx + 1) + ". copy of clause #" + std::to_string(clause->Index); }
 };
 
-class matrix_propagator : public PropagatorBase {
+class matrix_propagator : public propagator_base {
 
     vector<vector<clause_instance*>> cachedClauses;
     vector<unsigned> multiplicity;
@@ -56,15 +56,13 @@ class matrix_propagator : public PropagatorBase {
     int finalCnt = 0;
 
 public:
-    matrix_propagator(CNF<IndexedClause*>& cnf, ComplexADTSolver& adtSolver, ProgParams& progParams, unsigned literalCnt);
+    matrix_propagator(cnf<indexed_clause*>& cnf, ComplexADTSolver& adtSolver, ProgParams& progParams, unsigned literalCnt);
 
     ~matrix_propagator() override {
         for (auto& clause : allClauses) {
             delete clause;
         }
     }
-
-public:
 
     void next_level() {
         lvl++;
@@ -93,33 +91,33 @@ private:
 
 public:
 
-    clause_instance* GetClauseInstanceInfo(const IndexedClause* clause, unsigned cpyIdx, literal selector);
+    clause_instance* get_clause_instance(const indexed_clause* clause, unsigned cpyIdx, literal selector);
 
-    bool AreConnected(const GroundLiteral& l1, const GroundLiteral& l2);
+    bool are_connected(const ground_literal& l1, const ground_literal& l2);
 
-    void CheckProof(z3::solver& uniSolver, const vector<clause_instance*>& chosen);
+    void check_proof(z3::solver& uniSolver, const vector<clause_instance*>& chosen);
 
-    clause_instance* GetGround(const IndexedClause* clause, unsigned cpy);
+    clause_instance* GetGround(const indexed_clause* clause, unsigned cpy);
 
-    void AssertRoot();
+    void assert_root();
 
     void pb_clause_limit();
 
     void fixed2(literal e, bool value) override;
 
     void PropagateRules(literal e, clause_instance* info) {
-        for (auto& lit : info->literals) {
-            propagate({ e }, ConnectLiteral(info, lit));
+        for (const auto& lit : info->literals) {
+            propagate({ e }, connect_literal(info, lit));
         }
     }
 
-    formula ConnectLiteral(clause_instance* info, const GroundLiteral& lit);
+    formula connect_literal(clause_instance* info, const ground_literal& lit);
 
     void final() override;
 
     void FindPath(int clauseIdx, const vector<clause_instance*>& clauses, vector<path_element>& path, vector<vector<path_element>>& foundPaths, int limit);
 
-    void PrintProof(z3::solver& uniSolver, unordered_map<variableIdentifier, string>& prettyNames, unordered_map<unsigned, int>& usedClauses) {
+    void PrintProof(z3::solver& uniSolver, unordered_map<term_instance*, string>& prettyNames, unordered_map<unsigned, int>& usedClauses) {
         int clauseCnt = 1;
         unordered_map<clause_instance*, int> clauseToCnt;
         sort(chosen.begin(), chosen.end(), [](const clause_instance* c1, const clause_instance* c2) {
@@ -144,15 +142,15 @@ public:
 
                 for (int k = 0; k < chosen[i]->literals.size(); k++) {
                     for (int l = 0; l < chosen[j]->literals.size(); l++) {
-                        if (!AreConnected(chosen[i]->literals[k], chosen[j]->literals[l]))
+                        if (!are_connected(chosen[i]->literals[k], chosen[j]->literals[l]))
                             continue;
 
                         std::cout << "Connected: &" << clauseToCnt[chosen[i]] << ": " << PrettyPrintLiteral(chosen[i]->literals[k], &prettyNames) << " and &" << clauseToCnt[chosen[j]] << ": " << PrettyPrintLiteral(chosen[j]->literals[l], &prettyNames) << "\n";
 
                         for (int m = 0; m < chosen[i]->literals[k].GetArity(); m++) {
                             bool res = term_solver.Asserted(this->m.mk_true(),
-                                                            chosen[i]->literals[k].Literal->ArgBases[m], chosen[i]->copy_idx,
-                                                            chosen[j]->literals[l].Literal->ArgBases[m], chosen[j]->copy_idx, true);
+                                                            chosen[i]->literals[k].Literal->arg_bases[m]->GetInstance(chosen[i]->copy_idx),
+                                                            chosen[j]->literals[l].Literal->arg_bases[m]->GetInstance(chosen[j]->copy_idx), true);
                             if (!res)
                                 throw solving_exception("Failed unification");
                         }
@@ -161,7 +159,7 @@ public:
             }
         }
 
-        CheckProof(uniSolver, chosen);
+        check_proof(uniSolver, chosen);
     }
 
 protected:

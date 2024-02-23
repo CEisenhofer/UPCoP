@@ -22,17 +22,17 @@ add_executable(UPCoP
         CLIParser.cpp
         ConnectionCalculus.cpp
         utils.cpp
-        Term.cpp
-        PropagatorBase.cpp
+        term.cpp
+        propagator_base.cpp
         matrix_propagator.cpp
         ADTSolver.cpp
-        CNF.h
-        Clause.cpp
-        Clause.h
-        Literal.cpp
-        Literal.h
-        GroundLiteral.cpp
-        GroundLiteral.h
+        cnf.h
+        clause.cpp
+        clause.h
+        fo_literal.cpp
+        fo_literal.h
+        ground_literal.cpp
+        ground_literal.h
 )
 
 target_link_libraries(UPCoP PRIVATE ${Z3_LIBRARIES})

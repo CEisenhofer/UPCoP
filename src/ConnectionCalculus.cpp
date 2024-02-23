@@ -1,7 +1,7 @@
 #include "ConnectionCalculus.h"
 #include "CLIParser.h"
-#include "Clause.h"
-#include "CNF.h"
+#include "clause.h"
+#include "cnf.h"
 #include "utils.h"
 #include "ADTSolver.h"
 #include "matrix_propagator.h"
@@ -16,14 +16,14 @@
 
 #endif
 
-Term* VariableAbstraction::Apply(const pvector<Term>& args) const {
+term* variable_abstraction::Apply(const pvector<term>& args) const {
     assert(args.empty());
-    Term* t = solver->MakeVar(-id - 1);
+    term* t = solver->MakeVar(-id - 1);
     return t;
 }
 
-Term* TermAbstraction::Apply(const pvector<Term>& args) const {
-    Term* t = solver->MakeTerm(termId, args);
+term* term_abstraction::Apply(const pvector<term>& args) const {
+    term* t = solver->MakeTerm(termId, args);
     return t;
 }
 
@@ -85,7 +85,7 @@ static string ConvertByVampire(const string& content, bool tptp) {
         write(toPipe[1], content.c_str(), content.size());
         close(toPipe[1]);
 
-        char buffer[4096];
+        char buffer[4096] = { 0 };
         ssize_t bytesRead;
         string output;
 
@@ -110,9 +110,9 @@ static string ConvertByVampire(const string& content, bool tptp) {
 }
 #endif
 
-static void deleteCNF(CNF<IndexedClause*>& root) {
+static void deleteCNF(cnf<indexed_clause*>& root) {
     // delete literal as well -> avoid double freeing
-    unordered_set<IndexedLiteral*> seen;
+    unordered_set<indexed_literal*> seen;
     for (auto& c : root.nonConjectureClauses) {
         for (const auto& l : c->literals) {
             if (seen.insert(l).second)
@@ -159,15 +159,15 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
     }
     if (assertions.empty())
         return sat;
-    ComplexADTSolver adtSolver(progParams.Z3Split);
+    ComplexADTSolver adtSolver;
     unsigned literalCnt = 0;
-    auto cnf = ToCNF(mk_and(assertions), adtSolver, literalCnt);
+    auto cnf = to_cnf(mk_and(assertions), adtSolver, literalCnt);
 
     if (!silent) {
         cout << "Input file: " + path << "\n";
         cout << cnf.size() << " Clauses:\n";
         for (unsigned i = 0; i < cnf.size(); i++) {
-            cout << "\tClause #" << i << ": " << cnf[i]->ToString() << (cnf.IsConjecture(i) ? "*" : "") << "\n";
+            cout << "\tClause #" << i << ": " << cnf[i]->ToString() << (cnf.is_conjecture(i) ? "*" : "") << "\n";
         }
         std::flush(cout);
     }
@@ -183,10 +183,10 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         // parameters.set("timeout", (unsigned) timeLeft);
         // solver.set(parameters);
 
-        tri_state res;
+        tri_state res = undef;
         try {
             propagator.Running = true;
-            propagator.AssertRoot();
+            propagator.assert_root();
             res = propagator.Satisfiable ? sat : propagator.check();
         }
         catch (std::exception& ex) {
@@ -213,7 +213,6 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
             }
             if (timeLeft < 1000 * 60 * 60 * 24)
                 cout << "Time left: " << timeLeft << "ms" << endl;
-            propagator.solver->reset_constraint();
             propagator.next_level();
             continue;
         }
@@ -227,7 +226,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         if (!silent)
             cout << "\nFound proof at level: " << id << endl;
         unordered_map<unsigned, int> usedClauses;
-        unordered_map<variableIdentifier, string> prettyNames;
+        unordered_map<term_instance*, string> prettyNames;
 
         if (silent) {
             deleteCNF(cnf);
@@ -237,25 +236,25 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         z3::solver subsolver(context);
         propagator.PrintProof(subsolver, prettyNames, usedClauses);
 
-        auto sortedPrettyNames = to_sorted_vector(prettyNames,
-                                                  [](auto& a, const auto& b) {
-                                                      if (a.first.id > b.first.id)
-                                                          return false;
-                                                      if (a.first.id < b.first.id)
-                                                          return true;
-                                                      if (a.first.cpyIdx > b.first.cpyIdx)
-                                                          return false;
-                                                      if (a.first.cpyIdx < b.first.cpyIdx)
-                                                          return true;
-                                                      return a.first.solverId < b.first.solverId;
-                                                  });
+        auto sortedPrettyNames =
+                to_sorted_vector(prettyNames,
+                    [](const pair<term_instance*, string>& a, const pair<term_instance*, string>& b) {
+                        if (a.first->t->FuncID > b.first->t->FuncID)
+                            return false;
+                        if (a.first->t->FuncID < b.first->t->FuncID)
+                            return true;
+                        if (a.first->cpyIdx > b.first->cpyIdx)
+                            return false;
+                        if (a.first->cpyIdx < b.first->cpyIdx)
+                            return true;
+                        return a.first->t->getSolverId() > b.first->t->getSolverId();
+                });
 
         for (auto& s: sortedPrettyNames) {
-            auto interpretation = adtSolver.Solvers[s.first.solverId]->GetModel(s.first.id, s.first.cpyIdx);
-            if (!interpretation.has_value())
-                continue;
-            cout << "Substitution: " << s.second << " -> "
-                 << interpretation->term->PrettyPrint(interpretation->cpyIdx, &prettyNames) << '\n';
+            auto interpretation = s.first->FindRootQuick(propagator);
+            if (interpretation != s.first)
+                cout << "Substitution: " << s.second << " -> "
+                     << interpretation->t->PrettyPrint(interpretation->cpyIdx, &prettyNames) << '\n';
         }
 
         cout << "Usage statistics:" << std::endl;
@@ -272,9 +271,9 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
 
 namespace std {
     template<>
-    struct hash<pvector<IndexedLiteral>> {
-        size_t operator()(const pvector<IndexedLiteral>& x) const {
-            static const hash<IndexedLiteral> hash;
+    struct hash<pvector<indexed_literal>> {
+        size_t operator()(const pvector<indexed_literal>& x) const {
+            static const hash<indexed_literal> hash;
             size_t ret = 0;
             for (const auto& l: x) {
                 ret += hash(*l) * 267193;
@@ -285,8 +284,8 @@ namespace std {
 }
 namespace std {
     template<>
-    struct equal_to<pvector<IndexedLiteral>> {
-        bool operator()(const pvector<IndexedLiteral>& x, const pvector<IndexedLiteral>& y) const {
+    struct equal_to<pvector<indexed_literal>> {
+        bool operator()(const pvector<indexed_literal>& x, const pvector<indexed_literal>& y) const {
             if (x.size() != y.size())
                 return false;
             for (unsigned i = 0; i < x.size(); i++) {
@@ -298,7 +297,7 @@ namespace std {
     };
 }
 
-CNF<IndexedClause*> ToCNF(const z3::expr& input, ComplexADTSolver& adtSolver, unsigned& literalCnt) {
+cnf<indexed_clause*> to_cnf(const z3::expr& input, ComplexADTSolver& adtSolver, unsigned& literalCnt) {
     z3::context& ctx = input.ctx();
     unordered_set<optional<z3::func_decl>> terms;
     z3::expr_vector scopeVariables(ctx);
@@ -306,9 +305,9 @@ CNF<IndexedClause*> ToCNF(const z3::expr& input, ComplexADTSolver& adtSolver, un
     z3::expr_vector substitutions(ctx);
     unordered_map<string, unsigned> nameCache;
     unordered_set<unsigned> visited;
-    CNF<Clause> cnf = ToCNF(ctx, input, true, scopeVariables, scopeSorts, substitutions, terms, nameCache, visited);
+    cnf<clause> cnf = to_cnf(ctx, input, true, scopeVariables, scopeSorts, substitutions, terms, nameCache, visited);
 
-    unordered_map<z3::func_decl, TermAbstraction> termAbstraction;
+    unordered_map<z3::func_decl, term_abstraction> termAbstraction;
 
     bool finite = true;
     for (const auto& f: terms) {
@@ -317,14 +316,10 @@ CNF<IndexedClause*> ToCNF(const z3::expr& input, ComplexADTSolver& adtSolver, un
     }
 
     for (unsigned i = 0; i < cnf.size(); i++) {
-        for (auto& variable: cnf[i].containedVars) {
-            adtSolver.GetSolver(
-                    variable->get_sort().name().str()); // Include data types that occur without any constants/functions
+        for (const auto& variable: cnf[i].containedVars) {
+            adtSolver.GetSolver(variable->get_sort().name().str()); // Include data types that occur without any constants/functions
         }
     }
-
-    // For finite domains having a custom solver does not give us much ==> better take the debugged Z3 solver
-    adtSolver.MakeZ3ADT(ctx);
 
     for (const auto& f: terms) {
         SimpleADTSolver& solver = *adtSolver.GetSolver(f->range().name().str());
@@ -332,23 +327,23 @@ CNF<IndexedClause*> ToCNF(const z3::expr& input, ComplexADTSolver& adtSolver, un
         termAbstraction.try_emplace(*f, &solver, solver.GetId(f->name().str()));
     }
 
-    pvector<IndexedClause> newNonConjectureClauses;
-    pvector<IndexedClause> newConjectureClauses;
+    pvector<indexed_clause> newNonConjectureClauses;
+    pvector<indexed_clause> newConjectureClauses;
 
-    unordered_map<Literal, IndexedLiteral*> literalToIndexed;
-    unordered_set<pvector<IndexedLiteral>> clauses;//(OrderedArrayComparer<IndexedLiteral>());
+    unordered_map<fo_literal, indexed_literal*> literalToIndexed;
+    unordered_set<pvector<indexed_literal>> clauses;//(OrderedArrayComparer<IndexedLiteral>());
 
     unsigned clauseIdx = 0;
 
     for (unsigned i = 0; i < cnf.size(); i++) {
         const auto& entry = cnf[i];
-        pvector<IndexedLiteral> literals;
+        pvector<indexed_literal> literals;
         z3::expr_vector from(ctx);
         for (const auto& var: entry.containedVars) {
             from.push_back(*var);
         }
         literals.reserve(entry.size());
-        unordered_map<z3::func_decl, VariableAbstraction> variableAbstraction;
+        unordered_map<z3::func_decl, variable_abstraction> variableAbstraction;
         for (int j = 0; j < entry.containedVars.size(); j++) {
             z3::func_decl arg = from[j].decl();
             auto& solver = *adtSolver.GetSolver(arg.range().name().str());
@@ -358,15 +353,15 @@ CNF<IndexedClause*> ToCNF(const z3::expr& input, ComplexADTSolver& adtSolver, un
                     solver.MakeVar(arg.name().str()));
         }
         for (const auto& lit: entry.literals) {
-            pvector<Term> args;
-            args.reserve(lit.ArgBases.size());
+            pvector<term> args;
+            args.reserve(lit.arg_bases.size());
             for (const auto& arg: lit.InitExprs.value()) {
                 args.push_back(SubstituteTerm(arg, termAbstraction, variableAbstraction));
             }
-            Literal lit2(lit.name, lit.nameID, lit.polarity, args);
-            IndexedLiteral* indexed;
+            fo_literal lit2(lit.name, lit.nameID, lit.polarity, args);
+            indexed_literal* indexed;
             if (!tryGetValue(literalToIndexed, lit2, indexed)) {
-                indexed = new IndexedLiteral(lit2, literalToIndexed.size());
+                indexed = new indexed_literal(lit2, literalToIndexed.size());
                 literalToIndexed.insert(make_pair(lit2, indexed));
             }
             literals.push_back(indexed);
@@ -378,23 +373,17 @@ CNF<IndexedClause*> ToCNF(const z3::expr& input, ComplexADTSolver& adtSolver, un
             // Eliminate duplicate clauses
             continue;
         }
-        pvector<IndexedClause>& list = cnf.IsConjecture(i) ? newConjectureClauses : newNonConjectureClauses;
-        z3::sort_vector sorts(ctx);
-        sorts.resize(from.size());
-        for (unsigned j = 0; j < sorts.size(); j++) {
-            z3::sort s = adtSolver.GetZ3Sort(from[j].get_sort().name().str());
-            sorts.set(j, s);
-        }
-        list.push_back(new IndexedClause(clauseIdx++, literals, sorts));
+        pvector<indexed_clause>& list = cnf.is_conjecture(i) ? newConjectureClauses : newNonConjectureClauses;
+        list.push_back(new indexed_clause(clauseIdx++, literals));
     }
 
     literalCnt = literalToIndexed.size();
     return { std::move(newNonConjectureClauses), std::move(newConjectureClauses) };
 }
 
-CNF<Clause> ToCNF(z3::context& ctx, const z3::expr& input, bool polarity, z3::expr_vector& scopeVars, z3::sort_vector& scopeSorts,
-      z3::expr_vector& substitutions, unordered_set<optional<z3::func_decl>>& terms, unordered_map<string, unsigned>& nameCache,
-      unordered_set<unsigned>& visited) {
+cnf<clause> to_cnf(z3::context& ctx, const z3::expr& input, bool polarity, z3::expr_vector& scopeVars, z3::sort_vector& scopeSorts,
+                   z3::expr_vector& substitutions, unordered_set<optional<z3::func_decl>>& terms, unordered_map<string, unsigned>& nameCache,
+                   unordered_set<unsigned>& visited) {
 
     if (!eq(input.get_sort(), ctx.bool_sort()))
         throw solving_exception("Expected boolean expression");
@@ -403,7 +392,7 @@ CNF<Clause> ToCNF(z3::context& ctx, const z3::expr& input, bool polarity, z3::ex
         unsigned prevSubstitutionsCnt = substitutions.size();
         unsigned boundCnt = Z3_get_quantifier_num_bound(ctx, input);
 
-        CNF<Clause> res;
+        cnf<clause> res;
         if (isSkolem) {
             cout << "Info for production: Vampire should have removed existential quantifier" << std::endl;
             const auto& vars = scopeVars;
@@ -419,7 +408,7 @@ CNF<Clause> ToCNF(z3::context& ctx, const z3::expr& input, bool polarity, z3::ex
                 substitutions.push_back(skolem(vars));
                 terms.insert(make_optional(skolem));
             }
-            res = ToCNF(ctx, input.body(), polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
+            res = to_cnf(ctx, input.body(), polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
             substitutions.resize(prevSubstitutionsCnt);
             return res;
         }
@@ -437,7 +426,7 @@ CNF<Clause> ToCNF(z3::context& ctx, const z3::expr& input, bool polarity, z3::ex
             scopeVars.push_back(e);
             scopeSorts.push_back(s);
         }
-        res = ToCNF(ctx, input.body(), polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
+        res = to_cnf(ctx, input.body(), polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
         substitutions.resize(prevSubstitutionsCnt);
         scopeVars.resize(scopeCnt);
         scopeSorts.resize(scopeCnt);
@@ -447,14 +436,14 @@ CNF<Clause> ToCNF(z3::context& ctx, const z3::expr& input, bool polarity, z3::ex
     auto decl = input.decl();
     switch (decl.decl_kind()) {
         case Z3_OP_UNINTERPRETED: {
-            CNF<Clause> cnf;
+            cnf<clause> c;
             if (decl.arity() == 1 && decl.name().str() == "#") {
-                cnf = ToCNF(ctx, input.arg(0), polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
-                vector<Clause> clauses;
-                clauses.reserve(cnf.nonConjectureClauses.size() + cnf.conjectureClauses.size());
-                add_range(clauses, cnf.nonConjectureClauses);
-                add_range(clauses, cnf.conjectureClauses);
-                return {vector<Clause>(), clauses};
+                c = to_cnf(ctx, input.arg(0), polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
+                vector<clause> clauses;
+                clauses.reserve(c.nonConjectureClauses.size() + c.conjectureClauses.size());
+                add_range(clauses, c.nonConjectureClauses);
+                add_range(clauses, c.conjectureClauses);
+                return {vector<clause>(), clauses};
             }
             for (const auto& arg: input.args()) {
                 CollectTerm(arg, terms, visited);
@@ -465,25 +454,25 @@ CNF<Clause> ToCNF(z3::context& ctx, const z3::expr& input, bool polarity, z3::ex
                 atom = !atom;
             z3::expr_vector v(ctx);
             v.push_back(atom);
-            cnf = CNF<Clause>({Clause(v, nameCache)});
-            cnf[0].AddVariables(scopeVars);
-            return cnf;
+            c = cnf<clause> ({clause(v, nameCache)});
+            c[0].AddVariables(scopeVars);
+            return c;
         }
         case Z3_OP_NOT:
-            return ToCNF(ctx, input.arg(0), !polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
+            return to_cnf(ctx, input.arg(0), !polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
         case Z3_OP_AND:
             switch (input.num_args()) {
                 case 0:
-                    return CNF<Clause>::GetTrue()   ;
+                    return cnf<clause>::GetTrue()   ;
                 case 1:
-                    return ToCNF(ctx, input.arg(0), polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
+                    return to_cnf(ctx, input.arg(0), polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
                 default: {
-                    vector<CNF<Clause>> cnfs;
+                    vector<cnf<clause>> cnfs;
                     unsigned sz = input.num_args();
                     cnfs.reserve(sz);
                     for (unsigned i = 0; i < sz; i++) {
-                        cnfs.push_back(ToCNF(ctx, input.arg(i), polarity, scopeVars, scopeSorts, substitutions,
-                                        terms, nameCache, visited));
+                        cnfs.push_back(to_cnf(ctx, input.arg(i), polarity, scopeVars, scopeSorts, substitutions,
+                                              terms, nameCache, visited));
                     }
                     return {cnfs};
                 }
@@ -491,9 +480,9 @@ CNF<Clause> ToCNF(z3::context& ctx, const z3::expr& input, bool polarity, z3::ex
         case Z3_OP_OR:
             switch (input.num_args()) {
                 case 0:
-                    return CNF<Clause>::GetFalse();
+                    return cnf<clause>::GetFalse();
                 case 1:
-                    return ToCNF(ctx, input.arg(0), polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
+                    return to_cnf(ctx, input.arg(0), polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
                 default: {
                     z3::expr arg1(ctx);
                     z3::expr arg2 = input.arg(input.num_args() - 1);
@@ -505,10 +494,10 @@ CNF<Clause> ToCNF(z3::context& ctx, const z3::expr& input, bool polarity, z3::ex
                         arg1 = mk_or(args);
                     }
 
-                    auto cnf1 = ToCNF(ctx, arg1, polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
-                    auto cnf2 = ToCNF(ctx, arg2, polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
-                    vector<Clause> clauses;
-                    clauses.reserve(cnf1.size() * cnf2.size());
+                    auto cnf1 = to_cnf(ctx, arg1, polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
+                    auto cnf2 = to_cnf(ctx, arg2, polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
+                    vector<clause> clauses;
+                    clauses.reserve((unsigned)cnf1.size() * (unsigned)cnf2.size());
                     for (int i = 0; i < cnf1.size(); i++) {
                         auto e1 = cnf1[i];
                         for (int j = 0; j < cnf2.size(); j++) {
@@ -520,12 +509,12 @@ CNF<Clause> ToCNF(z3::context& ctx, const z3::expr& input, bool polarity, z3::ex
                 }
             }
         case Z3_OP_IMPLIES:
-            return ToCNF(ctx, !input.arg(0) || input.arg(1), polarity,
-                         scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
+            return to_cnf(ctx, !input.arg(0) || input.arg(1), polarity,
+                          scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
         case Z3_OP_EQ:
-            return ToCNF(ctx,
+            return to_cnf(ctx,
                          (input.arg(0) || !input.arg(1)) && (!input.arg(0) || input.arg(1)),
-                         polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
+                          polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
         default:
             throw solving_exception("Unexpected operator " + input.decl().name().str());
     }
@@ -543,15 +532,15 @@ void CollectTerm(const z3::expr& expr, unordered_set<optional<z3::func_decl>>& l
         CollectTerm(arg, language, visited);
 }
 
-Term* SubstituteTerm(const z3::expr& expr,
-                     const unordered_map<z3::func_decl, TermAbstraction>& termAbstraction,
-                     const unordered_map<z3::func_decl, VariableAbstraction>& varAbstraction) {
-    vector<Term*> args;
+term* SubstituteTerm(const z3::expr& expr,
+                     const unordered_map<z3::func_decl, term_abstraction>& termAbstraction,
+                     const unordered_map<z3::func_decl, variable_abstraction>& varAbstraction) {
+    vector<term*> args;
     args.reserve(expr.num_args());
     for (const auto& arg: expr.args())
         args.push_back(SubstituteTerm(arg, termAbstraction, varAbstraction));
     z3::func_decl decl = expr.decl();
-    TermAbstraction abstraction;
+    term_abstraction abstraction;
     return tryGetValue(termAbstraction, decl, abstraction)
         ? abstraction.Apply(args)
         : varAbstraction.at(decl).Apply(args);

@@ -12,7 +12,7 @@ extern std::unordered_map<unsigned, std::string> names;
 #define LogN(s) Log(s)
 #endif
 
-class CaDiCalPropagator;
+class CaDiCal_propagator;
 class formula_term;
 class true_term;
 class false_term;
@@ -52,7 +52,7 @@ namespace std {
 
 class formula_manager {
     friend class formula_term;
-    friend class CaDiCalPropagator;
+    friend class CaDiCal_propagator;
     true_term* trueTerm;
     false_term* falseTerm;
 
@@ -145,7 +145,7 @@ public:
     // first:  0 -> just create a new variable and return it
     // first:  1 -> inline the variable positively
     // first: -1 -> inline the variable negatively
-    virtual const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) = 0;
+    virtual const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) = 0;
 
     static std::string string_join(const std::vector<formula_term*>& args, const std::string& sep) {
         assert(!args.empty());
@@ -189,7 +189,7 @@ public:
         return name;
     }
 
-    const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) override;
+    const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) override;
 };
 
 class false_term : public literal_term {
@@ -199,7 +199,7 @@ public:
     std::string to_string() const final { return "false"; }
 
     const literal_term*
-    get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) final {
+    get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) final {
         return nullptr;
     }
 };
@@ -210,7 +210,7 @@ public:
 
     std::string to_string() const final { return "true"; }
 
-    const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) final {
+    const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) final {
         return nullptr;
     }
 };
@@ -227,7 +227,7 @@ public:
         return name;
     }
 
-    const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) override;
+    const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) override;
 };
 
 class complex_term : public formula_term {
@@ -254,7 +254,7 @@ public:
         return name;
     }
 
-    const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) override;
+    const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) override;
 };
 
 class or_term : public complex_term {
@@ -268,7 +268,7 @@ public:
         return name;
     }
 
-    const literal_term* get_lits(CaDiCalPropagator& propagator, std::vector<std::vector<int>>& aux) override;
+    const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) override;
 };
 
 enum tri_state : unsigned char {
@@ -289,7 +289,7 @@ struct literal_eq {
     }
 };
 
-class CaDiCalPropagator : public CaDiCaL::ExternalPropagator {
+class CaDiCal_propagator : public CaDiCaL::ExternalPropagator {
 
 protected:
     std::vector<action> undoStack;
@@ -308,9 +308,13 @@ private:
     std::unordered_set<std::vector<int>> prev_propagations;
 
 protected:
-    bool is_conflict = false;
+    bool is_conflict_flag = false;
 
 public:
+
+    bool is_conflict() const {
+        return is_conflict_flag;
+    }
 
     CaDiCaL::Solver* solver = nullptr;
     formula_manager m;
@@ -336,11 +340,11 @@ public:
 
     void propagate_conflict(std::vector<literal> just);
 
-    void propagate(const std::vector<literal>& just, formula_term* prop);
+    void propagate(const std::vector<literal>& just, formula prop);
 
 protected:
 
-    CaDiCalPropagator() {
+    CaDiCal_propagator() {
         reinit_solver();
     }
 

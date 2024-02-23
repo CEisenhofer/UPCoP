@@ -1,5 +1,5 @@
 #include "CLIParser.h"
-#include "CNF.h"
+#include "cnf.h"
 #include "ADTSolver.h"
 #include "CadicalWrapper.h"
 
@@ -12,47 +12,47 @@ protected:
     Abstraction(SimpleADTSolver* solver) : solver(solver) {}
 
 public:
-    virtual Term* Apply(const pvector<Term>& args) const = 0;
+    virtual term* Apply(const pvector<term>& args) const = 0;
 };
 
-class VariableAbstraction : public Abstraction {
+class variable_abstraction : public Abstraction {
 
     int id;
 
 public:
 
-    VariableAbstraction() = default;
+    variable_abstraction() = default;
 
-    VariableAbstraction(SimpleADTSolver* solver, Term* variable) : Abstraction(solver), id(variable->FuncID) {
+    variable_abstraction(SimpleADTSolver* solver, term* variable) : Abstraction(solver), id(variable->FuncID) {
         assert(variable->FuncID < 0);
     }
 
-    Term* Apply(const pvector<Term>& args) const override;
+    term* Apply(const pvector<term>& args) const override;
 };
 
-class TermAbstraction : public Abstraction {
+class term_abstraction : public Abstraction {
 
     int termId;
 
 public:
 
-    TermAbstraction() = default;
+    term_abstraction() = default;
 
-    TermAbstraction(SimpleADTSolver* solver, int termId) : Abstraction(solver), termId(termId) {}
+    term_abstraction(SimpleADTSolver* solver, int termId) : Abstraction(solver), termId(termId) {}
 
-    Term* Apply(const pvector<Term>& args) const override;
+    term* Apply(const pvector<term>& args) const override;
 };
 
 tri_state solve(const string& path, ProgParams& progParams, bool silent);
 
-static CNF<IndexedClause*> ToCNF(const z3::expr& input, ComplexADTSolver& adtSolver, unsigned& literalCnt);
+static cnf<indexed_clause*> to_cnf(const z3::expr& input, ComplexADTSolver& adtSolver, unsigned& literalCnt);
 
-CNF<Clause> ToCNF(z3::context& ctx, const z3::expr& input, bool polarity, z3::expr_vector& scopeVars, z3::sort_vector& scopeSorts,
-      z3::expr_vector& substitutions, unordered_set<optional<z3::func_decl>>& terms, unordered_map<string, unsigned>& nameCache, unordered_set<unsigned>& visited);
+cnf<clause> to_cnf(z3::context& ctx, const z3::expr& input, bool polarity, z3::expr_vector& scopeVars, z3::sort_vector& scopeSorts,
+                   z3::expr_vector& substitutions, unordered_set<optional<z3::func_decl>>& terms, unordered_map<string, unsigned>& nameCache, unordered_set<unsigned>& visited);
 
 void CollectTerm(const z3::expr& expr, unordered_set<optional<z3::func_decl>>& language,
                  std::unordered_set<unsigned>& visited);
 
-Term* SubstituteTerm(const z3::expr& expr,
-                     const unordered_map<z3::func_decl, TermAbstraction>& termAbstraction,
-                     const unordered_map<z3::func_decl, VariableAbstraction>& varAbstraction);
+term* SubstituteTerm(const z3::expr& expr,
+                     const unordered_map<z3::func_decl, term_abstraction>& termAbstraction,
+                     const unordered_map<z3::func_decl, variable_abstraction>& varAbstraction);

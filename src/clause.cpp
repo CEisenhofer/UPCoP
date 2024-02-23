@@ -1,13 +1,13 @@
-#include "Clause.h"
+#include "clause.h"
 
-Clause::Clause(const z3::expr_vector& exprs, unordered_map<string, unsigned>& nameCache) {
+clause::clause(const z3::expr_vector& exprs, unordered_map<string, unsigned>& nameCache) {
     literals.reserve(exprs.size());
     for (const auto& e : exprs) {
         literals.emplace_back(e, nameCache);
     }
 }
 
-Clause::Clause(const Clause& c1, const Clause& c2) {
+clause::clause(const clause& c1, const clause& c2) {
     literals.reserve(c1.size() + c2.size());
     add_range(literals, c1.literals);
     add_range(literals, c2.literals);
@@ -18,15 +18,15 @@ Clause::Clause(const Clause& c1, const Clause& c2) {
         containedVars.insert(c);
 }
 
-IndexedClause::IndexedClause(unsigned index, const pvector<IndexedLiteral>& literals, z3::sort_vector& varSorts) :
-        literals(literals), Index(index), VarSorts(varSorts), Ground(
+indexed_clause::indexed_clause(unsigned index, const pvector<indexed_literal>& literals) :
+        literals(literals), Index(index), Ground(
         all_of(literals.cbegin(), literals.cend(),
-               [](const IndexedLiteral* o1) {
-                    return all_of(o1->ArgBases.cbegin(), o1->ArgBases.cend(), [](const auto& o2) { return o2->Ground; });
+               [](const indexed_literal* o1) {
+                    return all_of(o1->arg_bases.cbegin(), o1->arg_bases.cend(), [](const auto& o2) { return o2->Ground; });
                }
         )) {}
 
-string IndexedClause::ToString(int resolvedLiteralIdx) const {
+string indexed_clause::ToString(int resolvedLiteralIdx) const {
     if (literals.empty())
         return "false";
     if (literals.size() == 1)
