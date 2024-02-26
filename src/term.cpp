@@ -1,9 +1,11 @@
+#include <utility>
+
 #include "propagator_base.h"
 
 size_t hash<raw_term>::operator()(const raw_term& x) const {
     static const hash<term> hash;
     size_t ret = x.FuncID;
-    for (auto* arg : x.Args)
+    for (auto* arg: x.Args)
         ret = 31 * ret + hash(*arg);
     return ret;
 }
@@ -21,6 +23,7 @@ void EqualityJustification::AddJustification(SimpleADTSolver* adtSolver, vector<
     vector<Justification*> justifications;
     adtSolver->FindJust(LHS, RHS, justifications);
     for (auto* j: justifications) {
+        assert(j);
         j->AddJustification(adtSolver, just);
     }
 }
@@ -40,15 +43,15 @@ string lessThan::to_string() const {
     return LHS->to_string() + " < " + RHS->to_string();
 }
 
-equality::equality(term_instance* lhs, term_instance* rhs, vector<Justification*> just) : just(just) {
-        if (lhs->compare_to(rhs) <= 0) {
-            LHS = lhs;
-            RHS = rhs;
-        }
-        else {
-            LHS = rhs;
-            RHS = lhs;
-        }
+equality::equality(term_instance* lhs, term_instance* rhs, vector<Justification*> just) : just(std::move(just)) {
+    if (lhs->compare_to(rhs) <= 0) {
+        LHS = lhs;
+        RHS = rhs;
+    }
+    else {
+        LHS = rhs;
+        RHS = lhs;
+    }
 }
 
 string equality::to_string() const {
@@ -56,28 +59,30 @@ string equality::to_string() const {
 }
 
 size_t hash<equality>::operator()(const equality& x) const {
-    size_t h = (size_t)x.LHS;
-    h ^= (size_t)x.RHS + 0x9e3779b9 + (h << 6) + (h >> 2);
+    size_t h = (size_t) x.LHS;
+    h ^= (size_t) x.RHS + 0x9e3779b9 + (h << 6) + (h >> 2);
     return h;
 }
 
 size_t hash<lessThan>::operator()(const lessThan& x) const {
-    size_t h = (size_t)x.LHS;
-    h ^= (size_t)x.RHS + 0x9e3779b9 + (h << 6) + (h >> 2);
+    size_t h = (size_t) x.LHS;
+    h ^= (size_t) x.RHS + 0x9e3779b9 + (h << 6) + (h >> 2);
     return h;
 }
 
 term_instance* term_instance::FindRootQuick(propagator_base& propagator) {
-    term_instance * current = this;
+    term_instance* current = this;
     while (current != current->parent) {
         current = current->parent;
     }
+#if false
     if (current == parent)
         return current;
 
-    parent = current;
     auto* prev = parent;
     propagator.add_undo([this, prev]() { parent = prev; });
+    parent = current;
+#endif
     return current;
 }
 

@@ -110,7 +110,7 @@ public:
 
 private:
 
-    bool UpdateDiseq(term_instance* b, term_instance* newRoot, bool probe);
+    bool UpdateDiseq(term_instance* b, term_instance* newRoot);
     bool UpdateIneq(term_instance* newRoot);
 
 public:
@@ -123,16 +123,16 @@ public:
 private:
 
     bool Unify(term_instance* lhs, term_instance* rhs, vector<Justification*>& justifications);
-    z3::check_result NonUnify(Lazy& lazy, bool probe);
+    z3::check_result NonUnify(Lazy* lazy);
 
 
-    bool CheckCycle(term_instance* inst, vector<Justification*>& justifications, bool probe);
-    bool CheckCycle(term_instance* inst, term_instance* search, vector<Justification*>& justifications, bool probe);
+    bool CheckCycle(term_instance* inst, vector<Justification*>& justifications);
+    bool CheckCycle(term_instance* inst, term_instance* search, vector<Justification*>& justifications);
     bool Check(term_instance* start, term_instance* current, bool eq, vector<Justification*>& just, vector<term_instance*>& path, bool smaller);
 
 
-    bool AddRoot(term_instance* b, term_instance* newRoot, bool probe, bool incIneq = true);
-    bool MergeRoot(term_instance* r1, term_instance* r2, equality& eq, bool probe, bool incIneq = true);
+    bool AddRoot(term_instance* b, term_instance* newRoot, bool incIneq = true);
+    bool MergeRoot(term_instance* r1, term_instance* r2, equality& eq, bool incIneq = true);
 
 public:
     static void FindJust(term_instance* n1, term_instance* n2, vector<Justification*>& minimalJust);

@@ -35,8 +35,8 @@ add_executable(UPCoP
         ground_literal.h
 )
 
-target_link_libraries(UPCoP PRIVATE ${Z3_LIBRARIES})
-target_link_libraries(UPCoP PRIVATE ${CADICAL_LIBRARIES})
+target_link_libraries(UPCoP PRIVATE ${Z3_LIB})
+target_link_libraries(UPCoP PRIVATE ${CADICAL_LIB})
 
 include(CheckIPOSupported)
 check_ipo_supported(RESULT lto OUTPUT error)

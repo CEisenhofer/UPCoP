@@ -160,7 +160,6 @@ struct Lazy {
     stack<CheckPosition> Prev;
     term_instance* LHS = nullptr;
     term_instance* RHS = nullptr;
-    int ProcessIndex = 0;
     bool Solved = false;
 
     Lazy() = default;
@@ -238,7 +237,7 @@ struct term_instance {
     vector<tuple<term_instance*, bool, vector<Justification*>>> smaller;
 
     // watches
-    vector<Lazy> diseq_watches;
+    vector<Lazy*> diseq_watches;
     vector<tuple<term_instance*, term_instance*, bool, literal>> smaller_watches;
 
     bool is_root() const {
@@ -246,7 +245,7 @@ struct term_instance {
     }
 
 private:
-    term_instance(const term* term, unsigned cpyIdx) : t(term), cpyIdx(cpyIdx) { }
+    term_instance(const term* term, unsigned cpyIdx) : t(term), cpyIdx(cpyIdx), parent(this) { }
 
 public:
     static term_instance* NewInstance(const term* term, unsigned copy) {
@@ -271,6 +270,8 @@ public:
     }
 
     string to_string() const {
+        if (t->Ground)
+            return t->to_string();
         return t->to_string() + "#" + std::to_string(cpyIdx);
     }
 };

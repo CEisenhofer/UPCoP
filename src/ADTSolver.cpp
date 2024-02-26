@@ -19,14 +19,24 @@ SimpleADTSolver* ComplexADTSolver::GetSolver(const string& name) {
     return tryGetValue(nameToSolver, name, solver) ? solver : NewSolver(name);
 }
 
+static int inv_cnt = 0;
+
 bool ComplexADTSolver::Asserted(literal e, bool isTrue) {
     equality info;
     if (!tryGetValue(exprToEq, e, info))
         return false;
+    inv_cnt++;
     interpretation.insert(make_pair(e, isTrue));
     propagator->add_undo([this, e]() { interpretation.erase(e); });
-    assert(info.just.size() == 1 && typeid(info.just[0]) == typeid(LiteralJustification*) && ((LiteralJustification*)info.just[0])->lit == e);
-    Asserted(e, info.LHS, info.RHS, isTrue);
+    assert(info.just.size() == 1 && typeid(*(info.just[0])) == typeid(LiteralJustification) &&
+           ((LiteralJustification*) info.just[0])->lit == e);
+    try {
+        Asserted(e, info.LHS, info.RHS, isTrue);
+    }
+    catch (...) {
+        cout << "Crashed Unify" << endl;
+        exit(132);
+    }
     return true;
 }
 
@@ -101,7 +111,7 @@ void SimpleADTSolver::Conflict(const vector<Justification*>& just) {
     if (propagator().is_conflict())
         return;
     vector<literal> justExpr;
-    for (auto* j : just) {
+    for (auto* j: just) {
         j->AddJustification(this, justExpr);
     }
     propagator().propagate_conflict(justExpr);
@@ -111,7 +121,7 @@ void SimpleADTSolver::Propagate(const vector<Justification*>& just, formula prop
     if (propagator().is_conflict())
         return;
     vector<literal> justExpr;
-    for (auto* j : just) {
+    for (auto* j: just) {
         j->AddJustification(this, justExpr);
     }
     propagator().propagate(justExpr, prop);
@@ -121,7 +131,7 @@ string SimpleADTSolver::PrettyPrint(const term* t, unsigned cpyIdx,
                                     unordered_map<term_instance*, string>* prettyNames) const {
     if (t->FuncID < 0) {
         if (prettyNames == nullptr)
-            return "auto " + VarNames[-t->FuncID - 1];
+            return "var " + VarNames[-t->FuncID - 1];
         string name;
         if (tryGetValue(*prettyNames, t->GetInstance(cpyIdx), name))
             return name;
@@ -134,7 +144,7 @@ string SimpleADTSolver::PrettyPrint(const term* t, unsigned cpyIdx,
     std::stringstream sb;
     sb << FuncNames[t->FuncID];
     sb << '(' << PrettyPrint(t->Args[0], cpyIdx, prettyNames);
-    for (int i = 1; i <t->Args.size(); i++) {
+    for (int i = 1; i < t->Args.size(); i++) {
         sb << ',' << PrettyPrint(t->Args[i], cpyIdx, prettyNames);
     }
     sb << ')';
@@ -197,10 +207,10 @@ term* SimpleADTSolver::MakeVar(int idx) {
     return MakeTermInternal(-(idx + 1), {});
 }
 
-bool SimpleADTSolver::UpdateDiseq(term_instance* b, term_instance* newRoot, bool probe) {
+bool SimpleADTSolver::UpdateDiseq(term_instance* b, term_instance* newRoot) {
     assert(b->FindRootQuick(propagator()) == newRoot);
-    for (auto& info : newRoot->diseq_watches) {
-        if (NonUnify(info, probe) == z3::check_result::unsat)
+    for (auto& info: newRoot->diseq_watches) {
+        if (NonUnify(info) == z3::check_result::unsat)
             // TODO: Swap remove if sat
             return false;
     }
@@ -210,8 +220,8 @@ bool SimpleADTSolver::UpdateDiseq(term_instance* b, term_instance* newRoot, bool
         newRoot->diseq_watches.resize(prevSize);
     });
 
-    for (auto& info : b->diseq_watches) {
-        switch (NonUnify(info, probe)) {
+    for (auto& info: b->diseq_watches) {
+        switch (NonUnify(info)) {
             case z3::check_result::unsat:
                 return false;
             case z3::check_result::unknown:
@@ -252,7 +262,7 @@ string SimpleADTSolver::to_string() const {
 }
 
 bool SimpleADTSolver::Unify(literal just, term_instance* lhs, term_instance* rhs) {
-    vector<Justification*> justification { new LiteralJustification(just) };
+    vector<Justification*> justification{new LiteralJustification(just)};
     return Unify(lhs, rhs, justification);
 }
 
@@ -300,21 +310,23 @@ bool SimpleADTSolver::Unify(term_instance* lhs, term_instance* rhs, vector<Justi
             return false;
         }
         for (unsigned i = 0; i < r1->t->Args.size(); i++) {
-            if (!Unify(r1->t->Args[i]->GetInstance(r1->cpyIdx), r2->t->Args[i]->GetInstance(r2->cpyIdx), justifications))
+            if (!Unify(r1->t->Args[i]->GetInstance(r1->cpyIdx), r2->t->Args[i]->GetInstance(r2->cpyIdx),
+                       justifications))
                 return false;
         }
         justifications.resize(justifications.size() - 2);
         return true;
     }
 
-    vector<Justification*> justCpy(justifications.size());
-    for (const auto& j : justifications) {
+    vector<Justification*> justCpy;
+    justCpy.reserve(justifications.size());
+    for (const auto& j: justifications) {
         if (!j->is_tautology())
             justCpy.push_back(j);
     }
 
     equality equality(lhs, rhs, justCpy);
-    if (MergeRoot(r1, r2, equality, false)) {
+    if (MergeRoot(r1, r2, equality)) {
         justifications.resize(justifications.size() - 2);
         return true;
     }
@@ -322,86 +334,104 @@ bool SimpleADTSolver::Unify(term_instance* lhs, term_instance* rhs, vector<Justi
     return false;
 }
 
-z3::check_result SimpleADTSolver::NonUnify(Lazy& lazy, bool probe) {
-    if (lazy.Solved)
+z3::check_result SimpleADTSolver::NonUnify(Lazy* lazy) {
+    if (lazy->Solved)
         return z3::check_result::sat;
-    while (lazy.LHS != nullptr || !lazy.Prev.empty()) {
-        if (lazy.LHS == nullptr) {
-            assert(lazy.RHS == nullptr);
-            auto current = lazy.Prev.top();
+
+    unsigned prevSize = lazy->Justifications.size();
+    auto prevLHS = lazy->LHS, prevRHS = lazy->RHS;
+    auto prevPrev = lazy->Prev;
+
+    propagator().add_undo([lazy, prevSize, prevLHS, prevRHS, prevPrev]() {
+        lazy->Justifications.resize(prevSize);
+        lazy->LHS = prevLHS;
+        lazy->RHS = prevRHS;
+        lazy->Solved = false;
+        lazy->Prev = prevPrev;
+    });
+
+    while (lazy->LHS != nullptr || !lazy->Prev.empty()) {
+        if (lazy->LHS == nullptr) {
+            // don't worry about undoing operations on lazy; we copy it anyway
+            assert(lazy->RHS == nullptr);
+            auto current = lazy->Prev.top();
             if (current.ArgIdx >= current.LHS->t->Args.size()) {
-                lazy.Prev.pop();
+                lazy->Prev.pop();
                 continue;
             }
-            lazy.LHS = current.LHS->t->Args[current.ArgIdx]->GetInstance(current.LHS->cpyIdx);
-            lazy.RHS = current.RHS->t->Args[current.ArgIdx]->GetInstance(current.RHS->cpyIdx);
+            lazy->LHS = current.LHS->t->Args[current.ArgIdx]->GetInstance(current.LHS->cpyIdx);
+            lazy->RHS = current.RHS->t->Args[current.ArgIdx]->GetInstance(current.RHS->cpyIdx);
             current.ArgIdx++;
         }
 
-        assert(lazy.LHS != nullptr);
-        assert(lazy.RHS != nullptr);
+        assert(lazy->LHS != nullptr);
+        assert(lazy->RHS != nullptr);
 
-        term_instance* r1 = lazy.LHS->FindRootQuick(propagator());
-        term_instance* r2 = lazy.RHS->FindRootQuick(propagator());
+        term_instance* r1 = lazy->LHS->FindRootQuick(propagator());
+        term_instance* r2 = lazy->RHS->FindRootQuick(propagator());
         if (r1 == r2) {
-            lazy.Justifications.push_back(new EqualityJustification(lazy.LHS, lazy.RHS));
-            lazy.LHS = nullptr;
-            lazy.RHS = nullptr;
+            lazy->Justifications.push_back(new EqualityJustification(lazy->LHS, lazy->RHS));
+            lazy->LHS = nullptr;
+            lazy->RHS = nullptr;
             continue;
         }
-        if (r1->t->Ground && r2->t->Ground && r1->t->HashID != r2->t->HashID)
+        if (r1->t->Ground && r2->t->Ground && r1->t->HashID != r2->t->HashID) {
+            lazy->Solved = true;
             return z3::check_result::sat;
-        if (r1->t->is_const() && r2->t->is_const() && r1->t->FuncID != r2->t->FuncID)
+        }
+        if (r1->t->is_const() && r2->t->is_const() && r1->t->FuncID != r2->t->FuncID) {
+            lazy->Solved = true;
             return z3::check_result::sat;
+        }
 
-        if (r1->t->is_var() || r2->t->is_var())
+        if (r1->t->is_var() || r2->t->is_var()) {
+            assert((lazy->LHS != nullptr && lazy->RHS != nullptr) || !lazy->Prev.empty());
             return z3::check_result::unknown;
+        }
 
         assert(!r1->t->Args.empty());
         assert(r1->t->Args.size() == r2->t->Args.size());
 
-        lazy.Justifications.push_back(new EqualityJustification(lazy.LHS, r1));
-        lazy.Justifications.push_back(new EqualityJustification(lazy.RHS, r2));
+        lazy->Justifications.push_back(new EqualityJustification(lazy->LHS, r1));
+        lazy->Justifications.push_back(new EqualityJustification(lazy->RHS, r2));
 
         if (r1->t->Args.size() == 1) {
-            lazy.LHS = r1->t->Args[0]->GetInstance(r1->cpyIdx);
-            lazy.RHS = r2->t->Args[0]->GetInstance(r2->cpyIdx);
+            lazy->LHS = r1->t->Args[0]->GetInstance(r1->cpyIdx);
+            lazy->RHS = r2->t->Args[0]->GetInstance(r2->cpyIdx);
             continue;
         }
 
-        lazy.LHS = nullptr;
-        lazy.RHS = nullptr;
+        lazy->LHS = nullptr;
+        lazy->RHS = nullptr;
 
-        lazy.Prev.emplace(r1, r2);
+        lazy->Prev.emplace(r1, r2);
     }
 
-    if (!probe)
-        Conflict(lazy.Justifications);
+    Conflict(lazy->Justifications);
     return z3::check_result::unsat;
 }
 
-bool SimpleADTSolver::CheckCycle(term_instance* inst, vector<Justification*>& justifications, bool probe) {
+bool SimpleADTSolver::CheckCycle(term_instance* inst, vector<Justification*>& justifications) {
     if (!inst->t->is_const() || inst->t->Ground)
         return true;
     auto* r = inst->FindRootQuick(propagator());
     justifications.push_back(new EqualityJustification(inst, r));
     for (auto* arg: inst->t->Args) {
-        if (!CheckCycle(arg->GetInstance(inst->cpyIdx), r, justifications, probe))
+        if (!CheckCycle(arg->GetInstance(inst->cpyIdx), r, justifications))
             return false;
     }
     justifications.pop_back();
     return true;
 }
 
-bool SimpleADTSolver::CheckCycle(term_instance* inst, term_instance* search, vector<Justification*>& justifications, bool probe) {
+bool SimpleADTSolver::CheckCycle(term_instance* inst, term_instance* search, vector<Justification*>& justifications) {
     assert(search->is_root());
     auto* r = inst->FindRootQuick(propagator());
 
     if (r == search) {
         // Found the cycle
         justifications.push_back(new EqualityJustification(inst, r));
-        if (!probe)
-            Conflict(justifications);
+        Conflict(justifications);
         return false;
     }
 
@@ -410,7 +440,7 @@ bool SimpleADTSolver::CheckCycle(term_instance* inst, term_instance* search, vec
 
     justifications.push_back(new EqualityJustification(inst, r));
     for (auto* arg: inst->t->Args) {
-        if (!CheckCycle(arg->GetInstance(inst->cpyIdx), justifications, probe))
+        if (!CheckCycle(arg->GetInstance(inst->cpyIdx), justifications))
             return false;
     }
     justifications.pop_back();
@@ -418,23 +448,26 @@ bool SimpleADTSolver::CheckCycle(term_instance* inst, term_instance* search, vec
 }
 
 bool SimpleADTSolver::NonUnify(literal just, term_instance* lhs, term_instance* rhs) {
-    Lazy lazy(lhs, rhs);
-    lazy.Justifications.push_back(new LiteralJustification(just));
-    z3::check_result status = NonUnify(lazy, false);
-    if (status == z3::check_result::sat || lazy.Solved)
+    Lazy* lazy = new Lazy(lhs, rhs);
+    lazy->Justifications.push_back(new LiteralJustification(just));
+    propagator().add_undo([lazy]() { delete lazy; });
+    z3::check_result status = NonUnify(lazy);
+    if (status == z3::check_result::sat || lazy->Solved)
         return true;
     if (status == z3::check_result::unsat)
         return false;
 
-    assert(lazy.LHS != nullptr);
+    assert(lazy->LHS != nullptr);
 
-    auto* r = lazy.LHS->FindRootQuick(propagator());
+    auto* r = lazy->LHS->FindRootQuick(propagator());
     if (r->t->is_var()) {
+        propagator().add_undo([r]() { r->diseq_watches.pop_back(); });
         r->diseq_watches.push_back(lazy);
         return true;
     }
-    r = lazy.RHS->FindRootQuick(propagator());
+    r = lazy->RHS->FindRootQuick(propagator());
     assert(r->t->is_var());
+    propagator().add_undo([r]() { r->diseq_watches.pop_back(); });
     r->diseq_watches.push_back(lazy);
     return true;
 }
@@ -457,21 +490,20 @@ bool SimpleADTSolver::Less(literal just, term_instance* lhs, term_instance* rhs,
     unsigned prevGreaterCnt = r1->greater.size();
     unsigned prevSmallerCnt = r2->smaller.size();
 
-    vector<Justification*> just1 { new LiteralJustification(just) };
-    vector<Justification*> just2 { new LiteralJustification(just) };
+    vector<Justification*> just1{new LiteralJustification(just)};
+    vector<Justification*> just2{new LiteralJustification(just)};
 
     r1->greater.emplace_back(r2, eq, just1);
     r2->smaller.emplace_back(r1, eq, just2);
 
-    propagator().add_undo([r1, r2, prevGreaterCnt, prevSmallerCnt]()
-    {
+    propagator().add_undo([r1, r2, prevGreaterCnt, prevSmallerCnt]() {
         r1->greater.pop_back();
         r2->smaller.pop_back();
         assert(r1->greater.size() == prevGreaterCnt);
         assert(r2->smaller.size() == prevSmallerCnt);
     });
 
-    vector<Justification*> j { new LiteralJustification(just) };
+    vector<Justification*> j{new LiteralJustification(just)};
     vector<term_instance*> path;
     if (!Check(r1, r2, eq, j, path, false))
         return false;
@@ -485,7 +517,7 @@ bool SimpleADTSolver::Less(literal just, term_instance* lhs, term_instance* rhs,
             if (r1->t->FuncID < r2->t->FuncID)
                 return true;
             assert(r1->t->FuncID > r2->t->FuncID);
-            vector<Justification*> justifications {
+            vector<Justification*> justifications{
                     new LiteralJustification(just),
                     new EqualityJustification(lhs, r1),
                     new EqualityJustification(rhs, r2)
@@ -496,10 +528,12 @@ bool SimpleADTSolver::Less(literal just, term_instance* lhs, term_instance* rhs,
 
         assert(!r1->t->Args.empty());
 
-        vector<formula> cases(r1->t->Args.size() + (eq ? 1 : 0));
+        vector<formula> cases;
+        cases.reserve(r1->t->Args.size() + (eq ? 1 : 0));
 
         for (unsigned i = 0; i < r1->t->Args.size(); i++) {
-            vector<formula> cases2(i + 1);
+            vector<formula> cases2;
+            cases2.reserve(i + 1);
             for (unsigned j = 0; j < i; j++) {
                 cases2[j] = ComplexSolver.MakeEqualityExpr(
                         r1->t->Args[j]->GetInstance(r1->cpyIdx),
@@ -511,7 +545,8 @@ bool SimpleADTSolver::Less(literal just, term_instance* lhs, term_instance* rhs,
             cases[i] = propagator().m.mk_and(cases2);
         }
         if (eq) {
-            vector<formula> cases2(r1->t->Args.size());
+            vector<formula> cases2;
+            cases2.reserve(r1->t->Args.size());
             for (int i = 0; i < r1->t->Args.size(); i++) {
                 cases2[i] = ComplexSolver.MakeEqualityExpr(
                         r1->t->Args[i]->GetInstance(r1->cpyIdx),
@@ -519,7 +554,7 @@ bool SimpleADTSolver::Less(literal just, term_instance* lhs, term_instance* rhs,
             }
             cases[r1->t->Args.size()] = propagator().m.mk_and(cases2);
         }
-        vector<Justification*> justifications {
+        vector<Justification*> justifications{
                 new LiteralJustification(just),
                 new EqualityJustification(lhs, r1),
                 new EqualityJustification(rhs, r2)
@@ -539,19 +574,21 @@ bool SimpleADTSolver::Less(literal just, term_instance* lhs, term_instance* rhs,
     return true;
 }
 
-bool SimpleADTSolver::Check(term_instance* start, term_instance* current, bool eq, vector<Justification*>& just, vector<term_instance*>& path, bool smaller) {
+bool SimpleADTSolver::Check(term_instance* start, term_instance* current, bool eq, vector<Justification*>& just,
+                            vector<term_instance*>& path, bool smaller) {
     term_instance* r1 = start->FindRootQuick(propagator());
     term_instance* r2 = current->FindRootQuick(propagator());
     if (r1 == r2) {
         if (eq) {
-            vector<Justification*> justCpy(just.size());
-            for (const auto& j : just) {
+            vector<Justification*> justCpy;
+            justCpy.reserve(just.size());
+            for (const auto& j: just) {
                 if (!j->is_tautology())
                     justCpy.push_back(j);
             }
-            for (auto* p : path) {
+            for (auto* p: path) {
                 equality equality(start, p, justCpy);
-                MergeRoot(start, p, equality, false, false);
+                MergeRoot(start, p, equality, false);
             }
             return true;
         }
@@ -560,7 +597,8 @@ bool SimpleADTSolver::Check(term_instance* start, term_instance* current, bool e
     }
     just.push_back(new EqualityJustification(start, r1));
     just.push_back(new EqualityJustification(current, r2));
-    if (start->t->is_const() && r2->t->is_const() && r1->t->FuncID != r2->t->FuncID && smaller == (r1->t->FuncID < r2->t->FuncID)) {
+    if (start->t->is_const() && r2->t->is_const() && r1->t->FuncID != r2->t->FuncID &&
+        smaller == (r1->t->FuncID < r2->t->FuncID)) {
         Conflict(just);
         return false;
     }
@@ -590,12 +628,11 @@ bool SimpleADTSolver::Check(term_instance* start, term_instance* current, bool e
     return true;
 }
 
-bool SimpleADTSolver::AddRoot(term_instance* b, term_instance* newRoot, bool probe, bool incIneq) {
+bool SimpleADTSolver::AddRoot(term_instance* b, term_instance* newRoot, bool incIneq) {
     assert(b->is_root());
     assert(newRoot->is_root());
     unsigned prevCnt = newRoot->cnt;
-    propagator().add_undo([b, newRoot, prevCnt]()
-    {
+    propagator().add_undo([b, newRoot, prevCnt]() {
         b->parent = b;
         newRoot->cnt = prevCnt;
     });
@@ -603,17 +640,16 @@ bool SimpleADTSolver::AddRoot(term_instance* b, term_instance* newRoot, bool pro
     newRoot->cnt += b->cnt;
 
     vector<Justification*> just;
-    if (!CheckCycle(newRoot, just, probe))
+    if (!CheckCycle(newRoot, just))
         return false;
     assert(just.empty());
-    if (b->t->is_const() && !CheckCycle(b, just, probe))
+    if (b->t->is_const() && !CheckCycle(b, just))
         // Required for eg. x = f(a), x = f(x) <- the second would be immediately merged and we would only check f(a) for a cycle
         return false;
 
     unsigned prevSmallerSize = newRoot->smaller.size();
     unsigned prevGreaterSize = newRoot->greater.size();
-    propagator().add_undo([newRoot, prevSmallerSize, prevGreaterSize]()
-    {
+    propagator().add_undo([newRoot, prevSmallerSize, prevGreaterSize]() {
         newRoot->smaller.resize(prevSmallerSize);
         newRoot->greater.resize(prevGreaterSize);
     });
@@ -621,7 +657,7 @@ bool SimpleADTSolver::AddRoot(term_instance* b, term_instance* newRoot, bool pro
     add_range(newRoot->smaller, b->smaller);
     add_range(newRoot->greater, b->greater);
 
-    if (!UpdateDiseq(b, newRoot, probe))
+    if (!UpdateDiseq(b, newRoot))
         return false;
     if (incIneq) {
         if (!UpdateIneq(newRoot))
@@ -634,7 +670,7 @@ bool SimpleADTSolver::AddRoot(term_instance* b, term_instance* newRoot, bool pro
     return true;
 }
 
-bool SimpleADTSolver::MergeRoot(term_instance* r1, term_instance* r2, equality& eq, bool probe, bool incIneq) {
+bool SimpleADTSolver::MergeRoot(term_instance* r1, term_instance* r2, equality& eq, bool incIneq) {
     assert(r1->is_root());
     assert(r2->is_root());
     if (r1 == r2)
@@ -649,8 +685,7 @@ bool SimpleADTSolver::MergeRoot(term_instance* r1, term_instance* r2, equality& 
     eq.LHS->actual_connections.push_back(eq);
     eq.RHS->actual_connections.push_back(eq);
 
-    propagator().add_undo([eq, prev1, prev2]()
-    {
+    propagator().add_undo([eq, prev1, prev2]() {
         eq.LHS->actual_connections.pop_back();
         eq.RHS->actual_connections.pop_back();
         assert(eq.LHS->actual_connections.size() == prev1);
@@ -660,12 +695,12 @@ bool SimpleADTSolver::MergeRoot(term_instance* r1, term_instance* r2, equality& 
     if (r1->t->is_const() != r2->t->is_const())
         // Prefer constant roots
         return r1->t->is_const()
-               ? AddRoot(r2, r1, probe, incIneq)
-               : AddRoot(r1, r2, probe, incIneq);
+               ? AddRoot(r2, r1, incIneq)
+               : AddRoot(r1, r2, incIneq);
 
     return r1->cnt > r2->cnt
-           ? AddRoot(r2, r1, probe, incIneq)
-           : AddRoot(r1, r2, probe, incIneq);
+           ? AddRoot(r2, r1, incIneq)
+           : AddRoot(r1, r2, incIneq);
 }
 
 void SimpleADTSolver::FindJust(term_instance* n1, term_instance* n2, vector<Justification*>& minimalJust) {
@@ -674,7 +709,7 @@ void SimpleADTSolver::FindJust(term_instance* n1, term_instance* n2, vector<Just
     std::deque<tuple<term_instance*, term_instance*, equality>> todo;
     std::unordered_map<term_instance*, equality> prev;
 
-    for (auto c : n1->actual_connections) {
+    for (auto& c: n1->actual_connections) {
         auto* to = c.GetOther(n1);
         if (n2 == to) {
             add_range(minimalJust, c.just);
@@ -684,7 +719,7 @@ void SimpleADTSolver::FindJust(term_instance* n1, term_instance* n2, vector<Just
     }
 
     while (!todo.empty()) {
-        auto& [from, to, eq] = todo.front();
+        auto [from, to, eq] = todo.front();
         todo.pop_front();
         if (!prev.insert(make_pair(to, eq)).second)
             continue;
@@ -698,7 +733,7 @@ void SimpleADTSolver::FindJust(term_instance* n1, term_instance* n2, vector<Just
             }
             return;
         }
-        for (auto& equality : to->actual_connections) {
+        for (auto& equality: to->actual_connections) {
             auto* next = equality.GetOther(to);
             todo.emplace_back(to, next, equality);
         }

@@ -236,6 +236,7 @@ void matrix_propagator::fixed2(literal_term* e, bool value) {
         pb_clause_limit();
         return;
     }
+    //TODO: Core pb
 
     unsigned c = info->clause->Index;
 

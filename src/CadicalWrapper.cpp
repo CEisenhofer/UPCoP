@@ -134,7 +134,7 @@ void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
         bool value = lit > 0;
 
         literal v = m.mk_lit(abs(lit));
-        LogN("Fixed: " << literal_to_string(v) << " = " << value << " [" << lit << "]");
+        LogN("Fixed: " << literal_to_string(v) << " := " << value << " [" << lit << "]");
 
         assert(propagationReadIdx == 0);
         assert(interpretation.find(v) == interpretation.end());
@@ -151,7 +151,7 @@ void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
 
 void CaDiCal_propagator::notify_new_decision_level() {
     assert(propagationReadIdx == 0);
-    LogN("Push");
+    LogN("Pushed " + to_string(undoStackSize.size()));
     undoStackSize.push_back(undoStack.size());
 
     assert(propagations.size() == propagationIdx);
@@ -159,7 +159,7 @@ void CaDiCal_propagator::notify_new_decision_level() {
 
 void CaDiCal_propagator::notify_backtrack(size_t new_level) {
     assert(propagationReadIdx == 0);
-    LogN("Pop: " << (undoStackSize.size() - new_level));
+    LogN("Pop to " << new_level);
     is_conflict_flag = false;
     const unsigned prev = undoStackSize[new_level];
     undoStackSize.resize(new_level);
