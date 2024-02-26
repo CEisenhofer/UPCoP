@@ -75,14 +75,12 @@ term_instance* term_instance::FindRootQuick(propagator_base& propagator) {
     while (current != current->parent) {
         current = current->parent;
     }
-#if false
     if (current == parent)
         return current;
 
     auto* prev = parent;
     propagator.add_undo([this, prev]() { parent = prev; });
     parent = current;
-#endif
     return current;
 }
 
@@ -94,9 +92,13 @@ term::term(int funcId, pvector<term> args, SimpleADTSolver& solver, unsigned has
 }
 
 term::~term() {
-    for (auto* inst: instances) {
+    reset();
+}
+
+void term::reset() {
+    for (term_instance* inst : instances)
         delete inst;
-    }
+    instances.clear();
 }
 
 term_instance* term::GetInstance(unsigned cpy) const {

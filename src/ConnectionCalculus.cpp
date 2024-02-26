@@ -129,6 +129,28 @@ static void deleteCNF(cnf<indexed_clause*>& root) {
     }
 }
 
+void prep_rect(cnf<indexed_clause*>& matrix, ProgParams& progParams) {
+    assert(progParams.Mode == Rectangle);
+    for (int i = 0; i < matrix.size(); i++) {
+        if (matrix[i]->Ground) {
+            progParams.multiplicity.push_back(1);
+            continue;
+        }
+        progParams.multiplicity.push_back(progParams.Depth);
+    }
+}
+
+void prep_core(cnf<indexed_clause*>& matrix, ProgParams& progParams) {
+    assert(progParams.Mode == Core);
+    for (int c = 0; c < matrix.size(); c++) {
+        progParams.priority.push_back(0);
+        if (matrix.is_conjecture(c))
+            progParams.multiplicity.push_back(1);
+        else
+            progParams.multiplicity.push_back(0);
+    }
+}
+
 tri_state solve(const string& path, ProgParams& progParams, bool silent) {
     ifstream input(path);
     string content((istreambuf_iterator<char>(input)), istreambuf_iterator<char>());
@@ -172,10 +194,18 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         std::flush(cout);
     }
 
-    int timeLeft = progParams.Timeout == 0 ? INT_MAX : progParams.Timeout;
-    matrix_propagator propagator(cnf, adtSolver, progParams, literalCnt);
+    if (progParams.Mode == Rectangle) {
+        prep_rect(cnf, progParams);
+    }
+    else {
+        assert (progParams.Mode == Core);
+        prep_core(cnf, progParams);
+    }
 
-    for (unsigned id = progParams.StartDepth; id < progParams.MaxDepth; id++) {
+    int timeLeft = progParams.Timeout == 0 ? INT_MAX : progParams.Timeout;
+    matrix_propagator* propagator = new matrix_propagator(cnf, adtSolver, progParams, literalCnt);
+
+    for (unsigned id = progParams.Depth; id < progParams.MaxDepth; id++) {
         start_watch();
         // TODO
         // parameters.set("smt.restart_factor", 1.0);
@@ -183,22 +213,22 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         // parameters.set("timeout", (unsigned) timeLeft);
         // solver.set(parameters);
 
-        tri_state res = undef;
+        tri_state res;
         try {
-            propagator.Running = true;
-            propagator.assert_root();
-            res = propagator.Satisfiable ? sat : propagator.check();
+            propagator->Running = true;
+            propagator->assert_root();
+            res = propagator->Satisfiable ? sat : propagator->check();
         }
         catch (std::exception& ex) {
             cout << "Error: " << ex.what() << endl;
             exit(130);
         }
-        propagator.Running = false;
+        propagator->Running = false;
 
         if (res != sat) {
             if (!silent)
                 cout << "Failed with depth " << id << "\n" << endl;
-            timeLeft -= (int) stop_watch();
+            timeLeft -= (int)stop_watch();
             if (timeLeft <= 0) {
                 if (!silent)
                     cout << "Timeout" << endl;
@@ -213,13 +243,16 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
             }
             if (timeLeft < 1000 * 60 * 60 * 24)
                 cout << "Time left: " << timeLeft << "ms" << endl;
-            propagator.next_level();
+            propagator->next_level();
+            delete propagator;
+            propagator = new matrix_propagator(cnf, adtSolver, progParams, literalCnt);
             continue;
         }
-        if (propagator.Satisfiable) {
+        if (propagator->Satisfiable) {
             if (!silent)
                 cout << "SAT because of polarity" << endl;
             deleteCNF(cnf);
+            delete propagator;
             return sat;
         }
 
@@ -234,7 +267,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         }
 
         z3::solver subsolver(context);
-        propagator.PrintProof(subsolver, prettyNames, usedClauses);
+        propagator->PrintProof(subsolver, prettyNames, usedClauses);
 
         auto sortedPrettyNames =
                 to_sorted_vector(prettyNames,
@@ -251,7 +284,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
                 });
 
         for (auto& s: sortedPrettyNames) {
-            auto interpretation = s.first->FindRootQuick(propagator);
+            auto* interpretation = s.first->FindRootQuick(*propagator);
             if (interpretation != s.first)
                 cout << "Substitution: " << s.second << " -> "
                      << interpretation->t->PrettyPrint(interpretation->cpyIdx, &prettyNames) << '\n';
@@ -263,9 +296,11 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
             cout << "\tClause #" << sorted.first << ": " << sorted.second << endl;
         }
         deleteCNF(cnf);
+        delete propagator;
         return unsat;
     }
     deleteCNF(cnf);
+    delete propagator;
     return undef;
 }
 

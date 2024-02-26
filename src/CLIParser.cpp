@@ -39,10 +39,10 @@ void ParseParams(int argc, char* argv[], ProgParams& progParams) {
         if (c == "-d" || current == "--depth") {
             if (i + 1 >= argc)
                 CrashParams("Missing argument for " + c);
-            if (!to_uint(argv[i + 1], progParams.StartDepth))
+            if (!to_uint(argv[i + 1], progParams.Depth))
                 CrashParams("No number: " + std::string(argv[i + 1]));
-            if (progParams.StartDepth == 0)
-                progParams.StartDepth = 1;
+            if (progParams.Depth == 0)
+                progParams.Depth = 1;
             i += 2;
             continue;
         }
@@ -133,7 +133,7 @@ void ParseParams(int argc, char* argv[], ProgParams& progParams) {
         CrashParams("Unknown argument: " + c);
     }
 
-    if (progParams.MaxDepth < progParams.StartDepth)
+    if (progParams.MaxDepth < progParams.Depth)
         CrashParams("Maximum depth has to be at least as high as the starting depth");
     if (!progParams.Preprocess && progParams.Format == TPTP)
         CrashParams("TPTP input is only supported with preprocessing");
@@ -141,6 +141,6 @@ void ParseParams(int argc, char* argv[], ProgParams& progParams) {
         CrashParams("No file given");
     if (!progParams.Test && (argc < 2 || !std::filesystem::exists(argv[argc - 1])))
         CrashParams("File " + std::string(argv[argc - 1]) + " does not exist");
-    if (progParams.StartDepth > 1)
+    if (progParams.Depth > 1)
         std::cout << "Warning: Did not start with level 1. Run might be incomplete (unlikely but possible)" << std::endl;
 }

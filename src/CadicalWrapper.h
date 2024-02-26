@@ -7,9 +7,11 @@
 extern std::unordered_map<unsigned, std::string> names;
 #define Log(s) do { std::cout << s; } while (false)
 #define LogN(s) Log(s << std::endl)
+#define OPT(X) X
 #else
 #define Log(s) do { } while (false)
 #define LogN(s) Log(s)
+#define OPT(X)
 #endif
 
 class CaDiCal_propagator;
@@ -166,12 +168,19 @@ class literal_term : public formula_term {
 
 public:
 
-    literal_term(formula_manager& m, unsigned l, bool neg) : formula_term(m),
-                                                             name((neg ? "!" : "") + names.at(l)) {
+    literal_term(formula_manager& m, unsigned l, bool neg) : formula_term(m)
+#ifndef NDEBUG
+                                                             , name((neg ? "!" : "") + names.at(l))
+#endif
+                                                             {
         var_id = (signed) l * (neg ? -1 : 1);
     }
 
-    literal_term(formula_manager& m, signed l) : formula_term(m), name((l < 0 ? "!" : "") + names.at(abs(l))) {
+    literal_term(formula_manager& m, signed l) : formula_term(m)
+#ifndef NDEBUG
+                                                            , name((l < 0 ? "!" : "") + names.at(abs(l)))
+#endif
+                                                            {
         var_id = l;
     }
 
@@ -292,20 +301,29 @@ struct literal_eq {
 class CaDiCal_propagator : public CaDiCaL::ExternalPropagator {
 
 protected:
-    std::vector<action> undoStack;
+    std::vector<action> undo_stack;
 
 private:
-    std::vector<unsigned> undoStackSize;
+    std::vector<unsigned> undo_stack_limit;
 
-    unsigned propagationIdx = 0;
-    unsigned propagationReadIdx = 0;
-    std::vector<std::vector<int>> propagations;
+    unsigned pending_hard_propagations_idx = 0;
+    unsigned hard_propagation_read_idx = 0;
+    std::vector<std::vector<int>> pending_hard_propagations;
+
+    std::vector<unsigned> soft_propagation_limit;
+    std::vector<unsigned> soft_propagation_undo;
+    std::vector<std::pair<std::vector<int>, int>> pending_soft_propagations;
+    std::vector<std::vector<int>> soft_justifications;
+    unsigned soft_propagation_read_idx = 0;
 
     std::unordered_map<literal, bool, literal_hash, literal_eq> interpretation;
 
-
     // for persistent propagation
     std::unordered_set<std::vector<int>> prev_propagations;
+
+    unsigned literal_to_idx(int lit) const {
+        return 2 * abs(lit) + (unsigned)(lit < 0);
+    }
 
 protected:
     bool is_conflict_flag = false;
@@ -338,18 +356,24 @@ public:
         return solver->val(abs(v)) > 0;
     }
 
-    void propagate_conflict(std::vector<literal> just);
+#ifndef NDEBUG
+    void output_literals(const std::vector<literal>& lit) const;
+#endif
 
-    void propagate(const std::vector<literal>& just, formula prop);
+    void propagate_conflict(const std::vector<literal>& just);
+
+    bool hard_propagate(const std::vector<literal>& just, formula prop);
+
+    bool soft_propagate(const std::vector<literal>& just, literal prop);
 
 protected:
 
     CaDiCal_propagator() {
-        reinit_solver();
+        init_solver();
     }
 
     unsigned decision_lvl() const {
-        return undoStackSize.size();
+        return undo_stack_limit.size();
     }
 
     bool get_value(literal v, bool& value) const {
@@ -369,18 +393,16 @@ protected:
     int new_observed_var_raw() {
         signed newId = new_var_raw();
         solver->add_observed_var(newId);
+        soft_justifications.emplace_back();
+        soft_justifications.emplace_back();
+        assert(soft_justifications.size() == 2 * newId);
         return newId;
     }
 
-    void reinit_solver();
-    virtual void reinit_solver2() = 0;
+    void init_solver();
 
 public:
 #ifndef NDEBUG
-
-    int new_var(const std::string& name) {
-        return new_var_raw(); // We do not really care about this variable...
-    }
 
     int new_observed_var(const std::string& name) {
         int id = new_observed_var_raw();
@@ -389,8 +411,13 @@ public:
     }
 
 #else
-#define new_var(X) new_var_raw()
-#define new_observed_var(X) new_obsered_var_raw()
+    int new_var() {
+        return new_var_raw();
+    }
+
+    int new_observed_var() {
+        return new_observed_var_raw();
+    }
 #endif
 
 protected:
@@ -407,9 +434,11 @@ protected:
 
     bool cb_check_found_model(const std::vector<int>& model) override;
 
-    int cb_propagate() override {
-        return 0;
-    }
+    int cb_propagate() override;
+
+    int cb_add_reason_clause_lit(int propagated_lit) override;
+
+protected:
 
     bool cb_has_external_clause(bool& is_forgettable) override;
 

@@ -11,7 +11,7 @@ unsigned propagator_base::getRandom(unsigned min, unsigned max) const {
 propagator_base::propagator_base(cnf<indexed_clause*>& cnf, ComplexADTSolver& adtSolver, ProgParams& progParams, unsigned literalCnt)
     : term_solver(adtSolver), generator(0), progParams(progParams), matrix(cnf), UnificationHints(literalCnt) {
 
-    term_solver.propagator = this;
+    term_solver.reset(this);
 
     pvector<indexed_clause> posClauses;
     pvector<indexed_clause> negClauses;

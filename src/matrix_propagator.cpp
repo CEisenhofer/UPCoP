@@ -1,111 +1,65 @@
 ﻿#include "matrix_propagator.h"
 
 matrix_propagator::matrix_propagator(cnf<indexed_clause*>& cnf, ComplexADTSolver& adtSolver, ProgParams& progParams, unsigned literalCnt) :
-        propagator_base(cnf, adtSolver, progParams, literalCnt), lvl(progParams.StartDepth) {
+        propagator_base(cnf, adtSolver, progParams, literalCnt), lvl(progParams.Depth) {
 
     assert(progParams.Mode == Rectangle || progParams.Mode == Core);
 
-    multiplicity.resize(cnf.size());
+    cachedClauses.resize(matrix.size());
+
+    create_instances();
+
     if (progParams.Mode == Core) {
-        priority.resize(cnf.size());
+        for (unsigned i = 0; i < matrix.size(); i++) {
+            clauseLimitListExpr.push_back(m.mk_lit(new_observed_var(OPT("limit#" + to_string(i)))));
+            clauseLimitMap.insert(make_pair(clauseLimitListExpr[i], i));
+        }
 
-        for (unsigned i = 0; i < cnf.size(); i++) {
-            if (cnf.is_conjecture(i))
-                multiplicity[i] = 1;
+        for (int i = 0; i < matrix.size(); i++) {
+            if (matrix[i]->Ground && progParams.multiplicity[i] == 0)
+                continue;
+            solver->assume(clauseLimitListExpr[i]->get_lit());
         }
     }
-    else {
-        for (unsigned i = 0; i < cnf.size(); i++) {
-            multiplicity[i] = lvl;
-        }
-    }
-
-    cachedClauses.resize(cnf.size());
-    clauseLimitListExpr.resize(cnf.size());
-
-    if (progParams.Mode == Rectangle)
-        next_level_rect(lvl);
-    else
-        next_level_core(true);
 }
 
-void matrix_propagator::next_level_rect(unsigned inc_lvl) {
-    assert(progParams.Mode == Rectangle);
-    for (int i = 0; i < matrix.size(); i++) {
-        if (matrix[i]->Ground) {
-            GetGround(matrix[i], 0);
-            multiplicity[i] = 1;
+void matrix_propagator::create_instances() {
+    for (unsigned i = 0; i < progParams.multiplicity.size(); i++) {
+        assert(progParams.multiplicity[i] <= 1 || !matrix[i]->Ground);
+        if (progParams.multiplicity[i] == 0)
             continue;
-        }
-        const unsigned lim = multiplicity[i] + inc_lvl;
-        for (unsigned j = multiplicity[i]; j < lim; j++) {
-            GetGround(matrix[i], j - 1);
-        }
-        multiplicity[i] += inc_lvl;
+        GetGround(matrix[i], progParams.multiplicity[i] - 1);
     }
 }
 
-void matrix_propagator::next_level_core_prep() {
-    core.clear();
+bool matrix_propagator::next_level_core() {
+    std::vector<int> core;
     for (unsigned c = 0; c < matrix.size(); c++) {
         if (solver->failed((signed) c + 1)) {
-            priority[c]++;
+            progParams.priority[c]++;
             core.push_back(c);
         }
     }
 
     if (core.empty()) {
         Satisfiable = true;
-        return;
+        return true;
     }
-}
 
-void matrix_propagator::next_level_core(bool first) {
-    assert(progParams.Mode == Core);
-
-    auto instClause = [&](unsigned v) {
-        assert(!matrix[v]->Ground || multiplicity[v] <= 1);
-
-        priority[v] = 0;
-        GetGround(matrix[v], cachedClauses[v].size());
-
-//        if (!matrix[v]->Ground) {
-//            clauseLimitListExpr[v] = m.mk_lit(new_observed_var("limit#" + to_string(v)));
-//            clauseLimitMap.insert(make_pair(clauseLimitListExpr[v], v));
-//        }
-        Log("Increase clause #" + to_string(v) + " to " + to_string(cachedClauses[v].size()));
-    };
-
-    if (!first) {
-        unsigned maxVar = 1;
-        unsigned maxValue = 0;
-        for (unsigned v: core) {
-            if (priority[v] > maxValue) {
-                maxVar = v;
-                maxValue = priority[v];
-            }
-        }
-        instClause(maxVar);
-    }
-    else {
-        for (int c = 0; c < matrix.size(); c++) {
-            priority[c] = 0;
-            if (matrix.is_conjecture(c)) {
-                GetGround(matrix[c], 0);
-                multiplicity[c] = 1;
-            }
-            else
-                multiplicity[c] = 0;
-
-            clauseLimitListExpr[c] = m.mk_lit(new_observed_var("limit#" + to_string(c)));
-            clauseLimitMap.insert(make_pair(clauseLimitListExpr[c], c));
+    unsigned maxVar = 1;
+    unsigned maxValue = 0;
+    for (unsigned v: core) {
+        if (progParams.priority[v] > maxValue) {
+            maxVar = v;
+            maxValue = progParams.priority[v];
         }
     }
 
-    for (int i = 0; i < matrix.size(); i++) {
-        if (!matrix[i]->Ground || multiplicity[i] == 0)
-            solver->assume(clauseLimitListExpr[i]->get_lit());
-    }
+    progParams.priority[maxVar] = 0;
+    progParams.multiplicity[maxVar]++;
+    assert(progParams.multiplicity[maxVar] <= 1 || !matrix[maxVar]->Ground);
+    Log("Increase clause #" + to_string(maxVar) + " to " + to_string(progParams.multiplicity[maxVar]));
+    return false;
 }
 
 clause_instance* matrix_propagator::get_clause_instance(const indexed_clause* clause, unsigned cpyIdx, literal selector) {
@@ -160,10 +114,10 @@ void matrix_propagator::check_proof(z3::solver& uniSolver, const vector<clause_i
 #endif
 }
 
-clause_instance* matrix_propagator::GetGround(const indexed_clause* clause, unsigned int cpy) {
+clause_instance* matrix_propagator::GetGround(const indexed_clause* clause, unsigned cpy) {
     auto& instances = cachedClauses[clause->Index];
     for (unsigned i = instances.size(); i <= cpy; i++) {
-        literal selector = m.mk_lit(new_observed_var("select#" + to_string(clause->Index) + "@" + to_string(i)));
+        literal selector = m.mk_lit(new_observed_var(OPT("select#" + to_string(clause->Index) + "@" + to_string(i))));
         auto* info = get_clause_instance(clause, i, selector);
         instances.push_back(info);
         allClauses.push_back(info);
@@ -200,9 +154,10 @@ void matrix_propagator::pb_clause_limit() {
         }
 
         for (auto* p: prop) {
-            propagate(just, m.mk_not(p));
+            soft_propagate(just, m.mk_not(p));
         }
     }
+    // both cases can apply
     if (allClauses.size() - not_chosen.size() == lvl) {
         LogN("Enforcing lower limit");
         vector<literal> just;
@@ -218,7 +173,7 @@ void matrix_propagator::pb_clause_limit() {
         }
 
         for (auto* p: prop) {
-            propagate(just, p);
+            soft_propagate(just, p);
         }
     }
 }
@@ -240,13 +195,16 @@ void matrix_propagator::fixed2(literal_term* e, bool value) {
 
     unsigned c = info->clause->Index;
 
-    for (unsigned i = info->copy_idx; i > 0; i--) {
+    /*for (unsigned i = info->copy_idx; i > 0; i--) {
         if (cachedClauses[c][i - 1]->value == sat)
             break; // If some smaller element is already assigned true, it has propagated the remaining ones already - no reason to continue
         propagate({ e }, GetGround(info->clause, i - 1)->selector);
-    }
+    }*/
 
-#ifdef OPT
+    if (info->copy_idx > 0 && cachedClauses[c][info->copy_idx - 1]->value != sat)
+        soft_propagate({ e }, GetGround(info->clause, info->copy_idx - 1)->selector);
+
+#ifdef OPT_false
     if (progParams.Mode == Rectangle) {
             // For rect it gets better; for core worse...
             CreateTautologyConstraints(info.Clause);
@@ -263,7 +221,8 @@ void matrix_propagator::fixed2(literal_term* e, bool value) {
     add_undo([&]() { chosen.back()->value = undef; chosen.pop_back(); });
 
     if (!info->propagated) {
-        PropagateRules(e, info);
+        if (!PropagateRules(e, info))
+            return;
         info->propagated = true;
     }
 
@@ -405,7 +364,7 @@ void matrix_propagator::final() {
             propagate_conflict(justifications);
             return;
         }
-        propagate(justifications, m.mk_or(constraints));
+        hard_propagate(justifications, m.mk_or(constraints));
     }
 }
 
@@ -452,11 +411,5 @@ void matrix_propagator::FindPath(int clauseIdx, const vector<clause_instance*>& 
         if (foundPaths.size() >= limit)
             return;
         path.pop_back();
-    }
-}
-
-void matrix_propagator::reinit_solver2() {
-    for (auto* clause : allClauses) {
-        clause->propagated = false;
     }
 }

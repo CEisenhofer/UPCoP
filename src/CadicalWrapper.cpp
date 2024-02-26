@@ -32,49 +32,70 @@ bool std::equal_to<std::vector<formula_term*>>::operator()(const std::vector<for
     return true;
 }
 
-void CaDiCal_propagator::propagate_conflict(std::vector<literal> just) {
-    if (is_conflict_flag)
-        return;
-    is_conflict_flag = true;
 #ifndef NDEBUG
-    Log("Conflict: ");
-    for (unsigned i = 0; i < just.size(); i++) {
-        literal j = just[i];
+void CaDiCal_propagator::output_literals(const std::vector<literal>& lit) const {
+    std::vector<literal> unassigned;
+    std::vector<literal> wrong_val;
+    for (unsigned i = 0; i < lit.size(); i++) {
+        literal j = lit[i];
         auto it = interpretation.find(j);
-        assert(it != interpretation.end());
-        assert(it->second == literal_to_polarity(j));
+        if (it == interpretation.end()){
+            unassigned.push_back(j);
+        }
+        else if (it->second != literal_to_polarity(j)) {
+            wrong_val.push_back(j);
+        }
         Log(literal_to_string(j));
-        if (i + 1 < just.size())
+        if (i + 1 < lit.size())
             Log(", ");
     }
+    if (!wrong_val.empty()) {
+        for (const auto* j : wrong_val) {
+            LogN("Inconsistent interpretation: " << literal_to_string(j) << " is not " << literal_to_polarity(j));
+        }
+    }
+    if (!unassigned.empty()) {
+        for (const auto* j : unassigned) {
+            LogN("Unassigned: " << literal_to_string(j));
+        }
+    }
+    assert(wrong_val.empty() && unassigned.empty());
+}
+#endif
+
+static int incCnt = 0;
+
+void CaDiCal_propagator::propagate_conflict(const std::vector<literal>& just) {
+    if (is_conflict_flag)
+        return;
+    incCnt++;
+    assert(just.size() > 1); // No general problem with that, but this looks suspicious...
+    is_conflict_flag = true;
+#ifndef NDEBUG
+    Log("Conflict (hard) [" << incCnt++ << "]: ");
+    output_literals(just);
     LogN("");
 #endif
 
-    std::vector<int> j;
-    j.reserve(just.size());
+    std::vector<int> aux;
+    aux.reserve(just.size());
     for (literal k: just) {
-        j.push_back(-k->get_lit());
+        aux.push_back(-k->get_lit());
     }
-    propagations.emplace_back(std::move(j));
+    pending_hard_propagations.emplace_back(std::move(aux));
 }
 
-void CaDiCal_propagator::propagate(const std::vector<literal>& just, formula prop) {
+bool CaDiCal_propagator::hard_propagate(const std::vector<literal>& just, formula prop) {
     if (is_conflict_flag)
-        return;
+        return false;
     assert(!prop->is_true());
-    if (prop->is_false())
-        return propagate_conflict(just);
-#ifndef NDEBUG
-    Log("Propagating: ");
-    for (unsigned i = 0; i < just.size(); i++) {
-        literal j = just[i];
-        auto it = interpretation.find(j);
-        assert(it != interpretation.end());
-        assert(it->second == literal_to_polarity(j));
-        Log(literal_to_string(j));
-        if (i + 1 < just.size())
-            Log(", ");
+    if (prop->is_false()) {
+        propagate_conflict(just);
+        return false;
     }
+#ifndef NDEBUG
+    Log("Propagating (hard) [" << incCnt++ << "]: ");
+    output_literals(just);
     Log(" => ");
     LogN(prop->to_string());
 #endif
@@ -92,41 +113,46 @@ void CaDiCal_propagator::propagate(const std::vector<literal>& just, formula pro
     if (contains(prev_propagations, aux.back())) {
         assert(aux.size() == 1);
         // We already propagated this -> skip
-        return;
+        return true;
     }
     for (auto& k: aux) {
-        propagations.emplace_back(std::move(k));
+        pending_hard_propagations.emplace_back(std::move(k));
     }
     prev_propagations.insert(aux.back());
+    return true;
 }
 
-void CaDiCal_propagator::reinit_solver() {
-    bool first = solver == nullptr;
+bool CaDiCal_propagator::soft_propagate(const std::vector<literal>& just, literal prop) {
+    if (is_conflict_flag)
+        return false;
+    if (!soft_justifications[literal_to_idx(prop->get_lit())].empty())
+        // Already propagated
+        return true;
+
+    // TODO: Check if it is pending (not sure it is worth it...)
+#ifndef NDEBUG
+    Log("Propagating (soft) [" << incCnt++ << "]: ");
+    output_literals(just);
+    Log(" => ");
+    LogN(prop->to_string());
+#endif
+
+    std::vector<int> j;
+    j.reserve(just.size() + 1);
+    for (literal k: just) {
+        j.push_back(-k->get_lit());
+    }
+    const int propLit = prop->get_lit();
+    j.push_back(propLit);
+    pending_soft_propagations.emplace_back(std::move(j), propLit);
+    return true;
+}
+
+void CaDiCal_propagator::init_solver() {
     solver = new CaDiCaL::Solver();
     solver->set("ilb", 0);
     solver->set("ilbassumptions", 0);
     solver->connect_external_propagator(this);
-
-    if (first)
-        return;
-
-    // Reset everything done so far
-    undoStackSize.resize(0);
-    while (!undoStack.empty()) {
-        undoStack.back()();
-        undoStack.pop_back();
-    }
-    // reintroduce all terms used so far
-    for (auto* formula: m.id_to_formula) {
-        int id = formula->get_var_id();
-        if (id != 0)
-            solver->add_observed_var(id);
-    }
-
-    prev_propagations.clear();
-    is_conflict_flag = false;
-
-    reinit_solver2();
 }
 
 void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
@@ -135,11 +161,10 @@ void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
 
         literal v = m.mk_lit(abs(lit));
         LogN("Fixed: " << literal_to_string(v) << " := " << value << " [" << lit << "]");
-
-        assert(propagationReadIdx == 0);
+        assert(hard_propagation_read_idx == 0);
         assert(interpretation.find(v) == interpretation.end());
         interpretation.insert(std::make_pair(v, value));
-        undoStack.emplace_back([this, v]() {
+        undo_stack.emplace_back([this, v]() {
             interpretation.erase(v);
         });
 
@@ -150,34 +175,72 @@ void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
 }
 
 void CaDiCal_propagator::notify_new_decision_level() {
-    assert(propagationReadIdx == 0);
-    LogN("Pushed " + to_string(undoStackSize.size()));
-    undoStackSize.push_back(undoStack.size());
+    assert(hard_propagation_read_idx == 0);
+    LogN("Pushed " + to_string(undo_stack_limit.size()));
+    undo_stack_limit.push_back(undo_stack.size());
+    soft_propagation_limit.push_back(soft_propagation_undo.size());
 
-    assert(propagations.size() == propagationIdx);
+    assert(pending_hard_propagations.size() == pending_hard_propagations_idx);
+    assert(pending_soft_propagations.empty());
 }
 
 void CaDiCal_propagator::notify_backtrack(size_t new_level) {
-    assert(propagationReadIdx == 0);
+    assert(hard_propagation_read_idx == 0);
     LogN("Pop to " << new_level);
+
     is_conflict_flag = false;
-    const unsigned prev = undoStackSize[new_level];
-    undoStackSize.resize(new_level);
-    while (undoStack.size() > prev) {
-        undoStack.back()();
-        undoStack.pop_back();
+
+    soft_propagation_read_idx = 0;
+    pending_soft_propagations.clear();
+    const unsigned prevJust = soft_propagation_limit[new_level];
+    soft_propagation_limit.resize(new_level);
+    for (unsigned i = prevJust; i < soft_propagation_undo.size(); i++) {
+        soft_justifications[soft_propagation_undo[i]].clear();
+    }
+    soft_propagation_undo.resize(prevJust);
+
+    const unsigned prevAction = undo_stack_limit[new_level];
+    undo_stack_limit.resize(new_level);
+    while (undo_stack.size() > prevAction) {
+        undo_stack.back()();
+        undo_stack.pop_back();
     }
 }
 
 bool CaDiCal_propagator::cb_check_found_model(const std::vector<int>& model) {
-    assert(propagationReadIdx == 0);
-    assert(!is_conflict_flag);
+    assert(hard_propagation_read_idx == 0);
+    assert(soft_propagation_read_idx == 0);
+    assert(!is_conflict());
     final();
-    return propagations.size() == propagationIdx;
+    return pending_hard_propagations.size() == pending_hard_propagations_idx &&
+            !is_conflict();
 }
 
+int CaDiCal_propagator::cb_propagate() {
+    if (is_conflict())
+        return 0;
+    if (pending_soft_propagations.empty())
+        return 0;
+    auto& [just, prop] = pending_soft_propagations.back();
+    int ret = prop;
+    soft_justifications[literal_to_idx(ret)] = std::move(just);
+    soft_propagation_undo.push_back(literal_to_idx(ret));
+    pending_soft_propagations.pop_back();
+    return ret;
+}
+
+int CaDiCal_propagator::cb_add_reason_clause_lit(int propagated_lit) {
+    unsigned idx = literal_to_idx(propagated_lit);
+    assert(soft_justifications[idx].size() > 0);
+    if (soft_propagation_read_idx < soft_justifications[idx].size())
+        return soft_justifications[idx][soft_propagation_read_idx++];
+    soft_propagation_read_idx = 0;
+    return 0;
+}
+
+
 bool CaDiCal_propagator::cb_has_external_clause(bool& is_forgettable) {
-    return propagationIdx < propagations.size();
+    return pending_hard_propagations_idx < pending_hard_propagations.size();
 }
 
 int CaDiCal_propagator::cb_add_external_clause_lit() {
@@ -185,18 +248,18 @@ int CaDiCal_propagator::cb_add_external_clause_lit() {
     bool f = false;
     assert(cb_has_external_clause(f));
 #endif
-    auto& toAdd = propagations[propagationIdx];
-    if (propagationReadIdx >= toAdd.size()) {
-        propagationIdx++;
-        propagationReadIdx = 0;
+    auto& toAdd = pending_hard_propagations[pending_hard_propagations_idx];
+    if (hard_propagation_read_idx >= toAdd.size()) {
+        pending_hard_propagations_idx++;
+        hard_propagation_read_idx = 0;
 
-        if (propagationIdx >= propagations.size()) {
-            propagations.clear();
-            propagationIdx = 0;
+        if (pending_hard_propagations_idx >= pending_hard_propagations.size()) {
+            pending_hard_propagations.clear();
+            pending_hard_propagations_idx = 0;
         }
         return 0;
     }
-    return toAdd[propagationReadIdx++];
+    return toAdd[hard_propagation_read_idx++];
 }
 
 const literal_term* literal_term::get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) {
@@ -207,7 +270,7 @@ const literal_term* not_term::get_lits(CaDiCal_propagator& propagator, std::vect
     assert(!t->is_true() && !t->is_false());
     if (var_id != 0)
         return manager.mk_lit(var_id);
-    var_id = propagator.new_observed_var("<" + to_string() + ">");
+    var_id = propagator.new_observed_var(OPT("<" + to_string() + ">"));
     const formula_term* arg = t->get_lits(propagator, aux);
     aux.emplace_back(std::vector<int>({-var_id, -arg->get_var_id()}));
     aux.emplace_back(std::vector<int>({var_id, arg->get_var_id()}));
@@ -224,7 +287,7 @@ const literal_term* and_term::get_lits(CaDiCal_propagator& propagator, std::vect
         const auto* v = arg->get_lits(propagator, aux);
         argLits.push_back(v->get_lit());
     }
-    var_id = propagator.new_observed_var("<" + to_string() + ">");
+    var_id = propagator.new_observed_var(OPT("<" + to_string() + ">"));
     for (int arg: argLits) {
         aux.emplace_back(std::vector<int>({-var_id, arg}));
     }
@@ -248,7 +311,7 @@ const literal_term* or_term::get_lits(CaDiCal_propagator& propagator, std::vecto
         const auto* v = arg->get_lits(propagator, aux);
         argLits.push_back(v->get_lit());
     }
-    var_id = propagator.new_observed_var("<" + to_string() + ">");
+    var_id = propagator.new_observed_var(OPT("<" + to_string() + ">"));
     for (int arg: argLits) {
         aux.emplace_back(std::vector<int>({-arg, (signed)var_id}));
     }
@@ -394,7 +457,9 @@ formula_term* formula_manager::mk_and(std::vector<formula_term*> c) {
 }
 
 formula_manager::formula_manager() {
+#ifndef NDEBUG
     names.insert(std::make_pair(0, "false"));
+#endif
     trueTerm = new true_term(*this);
     falseTerm = new false_term(*this);
 }

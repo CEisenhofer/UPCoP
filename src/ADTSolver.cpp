@@ -6,6 +6,21 @@ ComplexADTSolver::~ComplexADTSolver() {
     }
 }
 
+void ComplexADTSolver::reset(propagator_base* propagator) {
+    prop = propagator;
+    interpretation.clear();
+    exprToEq.clear();
+    exprToLess.clear();
+    eqToExpr.clear();
+    lessToExpr.clear();
+
+    for (const auto* s : Solvers) {
+        for (auto term : s->hashCon) {
+            term.second->reset();
+        }
+    }
+}
+
 SimpleADTSolver* ComplexADTSolver::NewSolver(const string& name) {
     auto* adtSolver = new SimpleADTSolver(*this, Solvers.size());
     nameToSolver.insert(make_pair(name, adtSolver));
@@ -27,7 +42,7 @@ bool ComplexADTSolver::Asserted(literal e, bool isTrue) {
         return false;
     inv_cnt++;
     interpretation.insert(make_pair(e, isTrue));
-    propagator->add_undo([this, e]() { interpretation.erase(e); });
+    prop->add_undo([this, e]() { interpretation.erase(e); });
     assert(info.just.size() == 1 && typeid(*(info.just[0])) == typeid(LiteralJustification) &&
            ((LiteralJustification*) info.just[0])->lit == e);
     try {
@@ -44,19 +59,19 @@ bool ComplexADTSolver::Asserted(literal e, term_instance* lhs, term_instance* rh
     assert(&lhs->t->Solver == &rhs->t->Solver);
     return isTrue
            ? lhs->t->Solver.Unify(e, lhs, rhs)
-           : lhs->t->Solver.NonUnify(propagator->m.mk_not(e), lhs, rhs);
+           : lhs->t->Solver.NonUnify(prop->m.mk_not(e), lhs, rhs);
 }
 
 literal ComplexADTSolver::MakeEqualityExpr(term_instance* lhs, term_instance* rhs) {
     if (lhs->t->HashID == rhs->t->HashID && (lhs->cpyIdx == rhs->cpyIdx || lhs->t->Ground))
-        return propagator->m.mk_true();
+        return prop->m.mk_true();
 
     equality eq(lhs, rhs, vector<Justification*>());
 
     literal expr = nullptr;
     if (tryGetValue(eqToExpr, eq, expr))
         return expr;
-    expr = propagator->m.mk_lit(propagator->new_observed_var(eq.to_string()));
+    expr = prop->m.mk_lit(prop->new_observed_var(OPT(eq.to_string())));
     eq.just.push_back(new LiteralJustification(expr));
     exprToEq.insert(make_pair(expr, eq));
     eqToExpr.insert(make_pair(eq, expr));
@@ -64,18 +79,18 @@ literal ComplexADTSolver::MakeEqualityExpr(term_instance* lhs, term_instance* rh
 }
 
 literal ComplexADTSolver::MakeDisEqualityExpr(term_instance* lhs, term_instance* rhs) {
-    return propagator->m.mk_not(MakeEqualityExpr(lhs, rhs));
+    return prop->m.mk_not(MakeEqualityExpr(lhs, rhs));
 }
 
 literal ComplexADTSolver::MakeLessExpr(term_instance* lhs, term_instance* rhs) {
     if (lhs->t->HashID == rhs->t->HashID && (lhs->cpyIdx == rhs->cpyIdx || lhs->t->Ground))
-        return propagator->m.mk_false();
+        return prop->m.mk_false();
     if (lhs->t->is_const() == rhs->t->is_const()) {
         // TODO: Proper preprocessing
         if (lhs->t->FuncID < rhs->t->FuncID)
-            return propagator->m.mk_true();
+            return prop->m.mk_true();
         if (lhs->t->FuncID > rhs->t->FuncID)
-            return propagator->m.mk_false();
+            return prop->m.mk_false();
     }
 
     lessThan le(lhs, rhs);
@@ -83,14 +98,14 @@ literal ComplexADTSolver::MakeLessExpr(term_instance* lhs, term_instance* rhs) {
     literal expr = nullptr;
     if (tryGetValue(lessToExpr, le, expr))
         return expr;
-    expr = propagator->m.mk_lit(propagator->new_observed_var(le.to_string()));
+    expr = prop->m.mk_lit(prop->new_observed_var(OPT(le.to_string())));
     exprToLess.insert(make_pair(expr, le));
     lessToExpr.insert(make_pair(le, expr));
     return expr;
 }
 
 literal ComplexADTSolver::MakeGreaterEqExpr(term_instance* lhs, term_instance* rhs) {
-    return propagator->m.mk_not(MakeLessExpr(lhs, rhs));
+    return prop->m.mk_not(MakeLessExpr(lhs, rhs));
 }
 
 void ComplexADTSolver::PeekTerm(const string& solver, const string& name, int argCnt) {
@@ -124,7 +139,7 @@ void SimpleADTSolver::Propagate(const vector<Justification*>& just, formula prop
     for (auto* j: just) {
         j->AddJustification(this, justExpr);
     }
-    propagator().propagate(justExpr, prop);
+    propagator().hard_propagate(justExpr, prop);
 }
 
 string SimpleADTSolver::PrettyPrint(const term* t, unsigned cpyIdx,

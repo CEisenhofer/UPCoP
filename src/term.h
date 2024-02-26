@@ -88,6 +88,8 @@ public:
 
     ~term();
 
+    void reset();
+
     term_instance* GetInstance(unsigned cpy) const;
 
     bool SeemsPossiblyUnifiable(term* rhs, subterm_hint& hint);

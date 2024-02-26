@@ -14,12 +14,12 @@ class ComplexADTSolver {
     unordered_map<lessThan, literal> lessToExpr;
 
     unordered_map<literal, bool> interpretation;
+    propagator_base* prop = nullptr;
 
 public:
 
     vector<SimpleADTSolver*> Solvers;
 
-    propagator_base* propagator = nullptr;
 
     inline unsigned getSortCnt() const {
         return SortNames.size();
@@ -31,6 +31,12 @@ public:
     ComplexADTSolver& operator=(ComplexADTSolver&) = delete;
 
     ~ComplexADTSolver();
+
+    void reset(propagator_base* propagator);
+
+    inline propagator_base* propagator() const {
+        return prop;
+    }
 
     SimpleADTSolver* NewSolver(const string& name);
 
@@ -67,7 +73,7 @@ struct SimpleADTSolver {
     ComplexADTSolver& ComplexSolver;
 
     inline propagator_base& propagator() const {
-        return *ComplexSolver.propagator;
+        return *ComplexSolver.propagator();
     }
 
     optional<z3::sort> Z3Sort;

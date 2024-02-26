@@ -88,7 +88,7 @@ struct propagator_base : public CaDiCal_propagator {
 
 protected:
 
-    const ProgParams& progParams;
+    ProgParams& progParams;
     const cnf<indexed_clause*>& matrix;
 
     pvector<indexed_clause> initClauses;
@@ -111,7 +111,7 @@ public:
     bool Satisfiable = false;
 
     inline void add_undo(const action& action) {
-        undoStack.push_back(action);
+        undo_stack.push_back(action);
     }
 
 protected:

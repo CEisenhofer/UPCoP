@@ -1,6 +1,7 @@
 #pragma once
 
 #include <climits>
+#include <vector>
 
 enum InputFormat {
     TPTP,
@@ -24,7 +25,7 @@ enum ConjStrategy {
 struct ProgParams {
     int Timeout = 0;
     IncStrategy Mode = Rectangle;
-    unsigned StartDepth = 1;
+    unsigned Depth = 1;
     unsigned MaxDepth = UINT_MAX;
     bool ExternalIteration = true;
     bool Test = false;
@@ -34,6 +35,9 @@ struct ProgParams {
     // bool NewCore;
     bool Z3Split = false;
     InputFormat Format = TPTP;
+
+    std::vector<unsigned> multiplicity;
+    std::vector<unsigned> priority;
 
 #if defined(_WIN32) || defined(_WIN64)
 

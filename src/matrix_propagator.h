@@ -28,7 +28,7 @@ struct clause_instance {
         vector<literal> variables;
         variables.resize(sorts.size());
         for (int i = 0; i < variables.size(); i++) {
-            variables[i] = propagator.new_observed_var("arg" + i, sorts[i]);
+            variables[i] = propagator.new_observed_var(OPT("arg" + i, sorts[i]));
         }
         return variables;
     }*/
@@ -39,8 +39,6 @@ struct clause_instance {
 class matrix_propagator : public propagator_base {
 
     vector<vector<clause_instance*>> cachedClauses;
-    vector<unsigned> multiplicity;
-    vector<unsigned> priority;
 
     unordered_set<z3::func_decl> variableSet;
 
@@ -51,7 +49,7 @@ class matrix_propagator : public propagator_base {
     unordered_map<literal, clause_instance*> exprToInfo;
     unordered_map<literal, int> clauseLimitMap;
     vector<literal> clauseLimitListExpr;
-    unsigned lvl;
+    const unsigned lvl;
 
     int finalCnt = 0;
 
@@ -64,30 +62,26 @@ public:
         }
     }
 
-    void next_level() {
-        lvl++;
+    bool next_level() {
+        progParams.Depth = lvl + 1;
 
         if (progParams.Mode == Core)
-            next_level_core_prep();
+            return next_level_core();
 
-        reinit_solver();
-
-        if (progParams.Mode == Rectangle)
-            next_level_rect();
-        else if (progParams.Mode == Core)
-            next_level_core();
-        else {
-            assert(false);
+        assert(progParams.Mode == Rectangle);
+        for (unsigned i = 0; i < matrix.size(); i++) {
+            if (matrix[i]->Ground && progParams.multiplicity[i] > 0)
+                continue;
+            progParams.multiplicity[i] = progParams.Depth;
         }
+        return false;
     }
 
 private:
 
-    vector<int> core;
+    void create_instances();
 
-    void next_level_rect(unsigned inc_lvl = 1);
-    void next_level_core_prep();
-    void next_level_core(bool first = false);
+    bool next_level_core();
 
 public:
 
@@ -105,10 +99,12 @@ public:
 
     void fixed2(literal e, bool value) override;
 
-    void PropagateRules(literal e, clause_instance* info) {
+    bool PropagateRules(literal e, clause_instance* info) {
         for (const auto& lit : info->literals) {
-            propagate({ e }, connect_literal(info, lit));
+            if (!hard_propagate({ e }, connect_literal(info, lit)))
+                return false;
         }
+        return true;
     }
 
     formula connect_literal(clause_instance* info, const ground_literal& lit);
@@ -162,6 +158,4 @@ public:
         check_proof(uniSolver, chosen);
     }
 
-protected:
-    void reinit_solver2() override;
 };
