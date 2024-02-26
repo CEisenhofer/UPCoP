@@ -454,8 +454,8 @@ bool SimpleADTSolver::CheckCycle(term_instance* inst, term_instance* search, vec
         return true;
 
     justifications.push_back(new EqualityJustification(inst, r));
-    for (auto* arg: inst->t->Args) {
-        if (!CheckCycle(arg->GetInstance(inst->cpyIdx), justifications))
+    for (auto* arg: r->t->Args) {
+        if (!CheckCycle(arg->GetInstance(r->cpyIdx), search, justifications))
             return false;
     }
     justifications.pop_back();

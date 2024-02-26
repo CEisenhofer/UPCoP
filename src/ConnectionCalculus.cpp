@@ -227,7 +227,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
 
         if (res != sat) {
             if (!silent)
-                cout << "Failed with depth " << id << "\n" << endl;
+                cout << "Failed with depth " << id << endl;
             timeLeft -= (int)stop_watch();
             if (timeLeft <= 0) {
                 if (!silent)

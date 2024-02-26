@@ -216,9 +216,12 @@ bool CaDiCal_propagator::cb_check_found_model(const std::vector<int>& model) {
             !is_conflict();
 }
 
+static int invCnt = 0;
+
 int CaDiCal_propagator::cb_propagate() {
     if (is_conflict())
         return 0;
+    invCnt++;
     if (pending_soft_propagations.empty())
         return 0;
     auto& [just, prop] = pending_soft_propagations.back();
