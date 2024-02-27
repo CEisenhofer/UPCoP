@@ -89,7 +89,7 @@ public:
 
     bool are_connected(const ground_literal& l1, const ground_literal& l2);
 
-    void check_proof(z3::solver& uniSolver, const vector<clause_instance*>& chosen);
+    void check_proof(const vector<clause_instance*>& chosen);
 
     clause_instance* GetGround(const indexed_clause* clause, unsigned cpy);
 
@@ -155,7 +155,7 @@ public:
             }
         }
 
-        check_proof(uniSolver, chosen);
+        check_proof(chosen);
     }
 
 };

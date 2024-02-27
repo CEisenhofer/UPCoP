@@ -83,7 +83,7 @@ void CaDiCal_propagator::propagate_conflict(const std::vector<literal>& just) {
         aux.push_back(-k->get_lit());
     }
     pending_hard_propagations.emplace_back(std::move(aux));
-    std::cout << "Propagation cnt: " << pending_hard_propagations.size() << " current idx: " << pending_hard_propagations_idx << std::endl;
+    // std::cout << "Propagation cnt: " << pending_hard_propagations.size() << " current idx: " << pending_hard_propagations_idx << std::endl;
 }
 
 bool CaDiCal_propagator::hard_propagate(const std::vector<literal>& just, formula prop) {
@@ -120,7 +120,7 @@ bool CaDiCal_propagator::hard_propagate(const std::vector<literal>& just, formul
         pending_hard_propagations.emplace_back(std::move(k));
     }
     prev_propagations.insert(aux.back());
-    std::cout << "Propagation cnt: " << pending_hard_propagations.size() << " current idx: " << pending_hard_propagations_idx << std::endl;
+    // std::cout << "Propagation cnt: " << pending_hard_propagations.size() << " current idx: " << pending_hard_propagations_idx << std::endl;
     return true;
 }
 
@@ -276,7 +276,11 @@ const literal_term* not_term::get_lits(CaDiCal_propagator& propagator, std::vect
     assert(!t->is_true() && !t->is_false());
     if (var_id != 0)
         return manager.mk_lit(var_id);
+#ifdef NDEBUG
+    var_id = propagator.new_observed_var();
+#else
     var_id = propagator.new_observed_var(OPT("<" + to_string() + ">"));
+#endif
     const formula_term* arg = t->get_lits(propagator, aux);
     aux.emplace_back(std::vector<int>({-var_id, -arg->get_var_id()}));
     aux.emplace_back(std::vector<int>({var_id, arg->get_var_id()}));
@@ -293,7 +297,11 @@ const literal_term* and_term::get_lits(CaDiCal_propagator& propagator, std::vect
         const auto* v = arg->get_lits(propagator, aux);
         argLits.push_back(v->get_lit());
     }
+#ifdef NDEBUG
+    var_id = propagator.new_observed_var();
+#else
     var_id = propagator.new_observed_var(OPT("<" + to_string() + ">"));
+#endif
     for (int arg: argLits) {
         aux.emplace_back(std::vector<int>({-var_id, arg}));
     }
@@ -317,7 +325,11 @@ const literal_term* or_term::get_lits(CaDiCal_propagator& propagator, std::vecto
         const auto* v = arg->get_lits(propagator, aux);
         argLits.push_back(v->get_lit());
     }
+#ifdef NDEBUG
+    var_id = propagator.new_observed_var();
+#else
     var_id = propagator.new_observed_var(OPT("<" + to_string() + ">"));
+#endif
     for (int arg: argLits) {
         aux.emplace_back(std::vector<int>({-arg, (signed)var_id}));
     }

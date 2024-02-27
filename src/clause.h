@@ -9,6 +9,7 @@ struct clause {
 
     unordered_set<optional<z3::expr>> containedVars;
     vector<fo_literal> literals;
+    bool Conjecture = false;
 
     unsigned size() const { return literals.size(); }
 
@@ -65,6 +66,7 @@ struct indexed_clause {
     const pvector<indexed_literal> literals;
     const unsigned Index;
     bool Ground;
+    bool Conjecture = false;
 
     unsigned size() const { return literals.size(); }
 

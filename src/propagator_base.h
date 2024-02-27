@@ -91,8 +91,6 @@ protected:
     ProgParams& progParams;
     const cnf<indexed_clause*>& matrix;
 
-    pvector<indexed_clause> initClauses;
-
 public:
     ComplexADTSolver& term_solver;
     bool Running = true;
@@ -108,7 +106,6 @@ public:
 public:
 
     large_array UnificationHints;
-    bool Satisfiable = false;
 
     inline void add_undo(const action& action) {
         undo_stack.push_back(action);

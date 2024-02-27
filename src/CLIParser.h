@@ -31,7 +31,7 @@ struct ProgParams {
     bool Test = false;
     bool Preprocess = true;
     bool CheckProof = false;
-    ConjStrategy Conjectures = Auto;
+    ConjStrategy Conjectures = Keep;
     // bool NewCore;
     bool Z3Split = false;
     InputFormat Format = TPTP;

@@ -309,6 +309,7 @@ protected:
     std::vector<action> undo_stack;
 
 private:
+    int var_cnt = 0;
     std::vector<unsigned> undo_stack_limit;
 
     unsigned pending_hard_propagations_idx = 0;
@@ -390,17 +391,16 @@ protected:
     }
 
     int new_var_raw() {
-        signed newId = (signed) vars() + 1;
-        // solver->add_observed_var(newId);
+        int newId = ++var_cnt;
+        soft_justifications.emplace_back();
+        soft_justifications.emplace_back();
+        assert(2 * var_cnt == soft_justifications.size());
         return newId;
     }
 
     int new_observed_var_raw() {
         signed newId = new_var_raw();
         solver->add_observed_var(newId);
-        soft_justifications.emplace_back();
-        soft_justifications.emplace_back();
-        assert(soft_justifications.size() == 2 * newId);
         return newId;
     }
 
@@ -413,6 +413,10 @@ public:
         int id = new_observed_var_raw();
         names.insert(std::make_pair(id, name));
         return id;
+    }
+
+    int new_var() {
+        return new_var_raw();
     }
 
 #else

@@ -12,59 +12,6 @@ propagator_base::propagator_base(cnf<indexed_clause*>& cnf, ComplexADTSolver& ad
     : term_solver(adtSolver), generator(0), progParams(progParams), matrix(cnf), UnificationHints(literalCnt) {
 
     term_solver.reset(this);
-
-    pvector<indexed_clause> posClauses;
-    pvector<indexed_clause> negClauses;
-    posClauses.reserve(cnf.size());
-    negClauses.reserve(cnf.size());
-
-    for (unsigned i = 0; i < cnf.size(); i++) {
-        auto* clause = cnf[i];
-        if (cnf.is_conjecture(i))
-            initClauses.push_back(clause);
-        bool allPos = true;
-        bool allNeg = true;
-        for (const auto& lit: clause->literals) {
-            if (allPos && !lit->polarity)
-                allPos = false;
-            if (allNeg && lit->polarity)
-                allNeg = false;
-            if (!allPos && !allNeg)
-                break;
-        }
-        assert(!allPos || !allNeg);
-        if (allPos)
-            posClauses.push_back(clause);
-        else if (allNeg)
-            negClauses.push_back(clause);
-    }
-    if (posClauses.empty() || negClauses.empty()) {
-        Satisfiable = true;
-        return;
-    }
-
-    auto smallestClauseSet = posClauses.size() < negClauses.size() ? posClauses : negClauses;
-
-    if (progParams.Conjectures == Auto)
-        progParams.Conjectures =
-                initClauses.size() > 1 &&
-                (unsigned) log2((double)initClauses.size()) > smallestClauseSet.size() ? Min : Keep;
-    if (initClauses.empty() && progParams.Conjectures == Keep)
-        progParams.Conjectures = Min;
-
-    assert(progParams.Conjectures != Auto);
-
-    if (progParams.Conjectures == Pos)
-        initClauses = posClauses;
-    else if (progParams.Conjectures == Neg)
-        initClauses = negClauses;
-    else if (progParams.Conjectures == Min)
-        initClauses = smallestClauseSet;
-    else {
-        assert(progParams.Conjectures == Keep);
-    }
-
-    assert(!initClauses.empty());
 }
 
 large_array::large_array(unsigned size) : size(size) {

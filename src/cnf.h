@@ -4,59 +4,49 @@
 template<typename T>
 struct cnf {
 
-    static cnf<clause> GetTrue() {
+    vector<T> clauses;
+
+    static cnf<clause> get_true() {
         return {};
     }
 
-    static cnf<clause> GetFalse() {
-        return {vector<clause>(), vector<clause>{{}} };
+    static cnf<clause> get_false() {
+        return { vector<clause>{{}} };
     }
 
     static cnf<clause> True;
     static cnf<clause> False;
 
-    vector<T> nonConjectureClauses;
-    vector<T> conjectureClauses;
 
     inline unsigned size() const {
-        return nonConjectureClauses.size() + conjectureClauses.size();
+        return clauses.size();
     }
 
     inline T& operator[](unsigned i) {
-        return i < nonConjectureClauses.size() ? nonConjectureClauses[i] :
-               conjectureClauses[i - nonConjectureClauses.size()];
+        return clauses[i];
     }
 
     inline const T& operator[](unsigned i) const {
-        return i < nonConjectureClauses.size() ? nonConjectureClauses[i] :
-               conjectureClauses[i - nonConjectureClauses.size()];
+        return clauses[i];
     }
 
-    cnf() : nonConjectureClauses(), conjectureClauses() { }
+    cnf() = default;
 
-    cnf(vector<T> nonConjectureClauses, vector<T> conjectureClauses) :
-        nonConjectureClauses(std::move(nonConjectureClauses)), conjectureClauses(std::move(conjectureClauses)) { }
+    cnf(vector<T> clauses) :
+        clauses(std::move(clauses)) { }
 
-    cnf(vector<T> nonConjectureClauses) : nonConjectureClauses(std::move(nonConjectureClauses)), conjectureClauses() { }
-
-    cnf(const vector<cnf<T>>& cnfs) : nonConjectureClauses(), conjectureClauses() {
-        unsigned conjSum = 0, nonConjSum = 0;
+    cnf(const vector<cnf<T>>& cnfs) {
+        unsigned sum = 0;
         for (auto& cnf : cnfs) {
-            conjSum += cnf.conjectureClauses.size();
-            nonConjSum += cnf.nonConjectureClauses.size();
+            sum += cnf.clauses.size();
         }
-        nonConjectureClauses.reserve(nonConjSum);
+        clauses.reserve(sum);
         for (auto& cnf : cnfs) {
-            add_range(nonConjectureClauses, cnf.nonConjectureClauses);
-            add_range(conjectureClauses, cnf.conjectureClauses);
+            add_range(clauses, cnf.clauses);
         }
     }
 
-    inline bool is_conjecture(unsigned idx) const {
-        return idx >= nonConjectureClauses.size();
-    }
-
-    string ToString() const {
+    string to_string() const {
         if (size() == 0)
             return "true";
         std::stringstream sb;

@@ -113,19 +113,12 @@ static string ConvertByVampire(const string& content, bool tptp) {
 static void deleteCNF(cnf<indexed_clause*>& root) {
     // delete literal as well -> avoid double freeing
     unordered_set<indexed_literal*> seen;
-    for (auto& c : root.nonConjectureClauses) {
-        for (const auto& l : c->literals) {
+    for (unsigned i = 0; i < root.size(); i++) {
+        for (const auto& l : root[i]->literals) {
             if (seen.insert(l).second)
                 delete l;
         }
-        delete c;
-    }
-    for (auto& c : root.conjectureClauses) {
-        for (const auto& l : c->literals) {
-            if (seen.insert(l).second)
-                delete l;
-        }
-        delete c;
+        delete root[i];
     }
 }
 
@@ -144,7 +137,7 @@ void prep_core(cnf<indexed_clause*>& matrix, ProgParams& progParams) {
     assert(progParams.Mode == Core);
     for (int c = 0; c < matrix.size(); c++) {
         progParams.priority.push_back(0);
-        if (matrix.is_conjecture(c))
+        if (matrix[c]->Conjecture)
             progParams.multiplicity.push_back(1);
         else
             progParams.multiplicity.push_back(0);
@@ -183,13 +176,80 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         return sat;
     ComplexADTSolver adtSolver;
     unsigned literalCnt = 0;
-    auto cnf = to_cnf(mk_and(assertions), adtSolver, literalCnt);
+    cnf<indexed_clause*> cnf = to_cnf(mk_and(assertions), adtSolver, literalCnt);
+
+    vector<indexed_clause*> posClauses;
+    vector<indexed_clause*> negClauses;
+    posClauses.reserve(cnf.size());
+    negClauses.reserve(cnf.size());
+
+    unsigned conjectureCnt = 0;
+
+    for (unsigned i = 0; i < cnf.size(); i++) {
+        auto* clause = cnf[i];
+        bool allPos = true;
+        bool allNeg = true;
+        conjectureCnt += (unsigned)clause->Conjecture;
+        for (const auto& lit: clause->literals) {
+            if (allPos && !lit->polarity)
+                allPos = false;
+            if (allNeg && lit->polarity)
+                allNeg = false;
+            if (!allPos && !allNeg)
+                break;
+        }
+        assert(!allPos || !allNeg);
+        if (allPos)
+            posClauses.push_back(clause);
+        else if (allNeg)
+            negClauses.push_back(clause);
+    }
+    if (posClauses.empty() || negClauses.empty()) {
+        if (!silent)
+            cout << "SAT because of polarity" << endl;
+        deleteCNF(cnf);
+        return sat;
+    }
+
+    auto smallestClauseSet = posClauses.size() < negClauses.size() ? posClauses : negClauses;
+
+    if (progParams.Conjectures == Auto)
+        progParams.Conjectures =
+                conjectureCnt > 1 &&
+                (unsigned) log2((double)conjectureCnt) > smallestClauseSet.size() ? Min : Keep;
+    if (conjectureCnt == 0 && progParams.Conjectures == Keep)
+        progParams.Conjectures = Min;
+
+    assert(progParams.Conjectures != Auto);
+
+    std::vector<indexed_clause*> new_conj;
+
+    if (progParams.Conjectures == Pos)
+        new_conj = std::move(posClauses);
+    else if (progParams.Conjectures == Neg)
+        new_conj = std::move(negClauses);
+    else if (progParams.Conjectures == Min)
+        new_conj = std::move(smallestClauseSet);
+    else {
+        assert(progParams.Conjectures == Keep);
+    }
+
+    if (progParams.Conjectures != Keep) {
+        for (unsigned i = 0; i < cnf.size(); i++) {
+            cnf[i]->Conjecture = false;
+        }
+        for (auto* c : new_conj) {
+            c->Conjecture = true;
+        }
+    }
+
+    assert(std::any_of(cnf.clauses.begin(), cnf.clauses.end(), [](const auto* x) { return x->Conjecture; }));
 
     if (!silent) {
         cout << "Input file: " + path << "\n";
         cout << cnf.size() << " Clauses:\n";
         for (unsigned i = 0; i < cnf.size(); i++) {
-            cout << "\tClause #" << i << ": " << cnf[i]->ToString() << (cnf.is_conjecture(i) ? "*" : "") << "\n";
+            cout << "\tClause #" << i << ": " << cnf[i]->ToString() << (cnf[i]->Conjecture ? "*" : "") << "\n";
         }
         std::flush(cout);
     }
@@ -217,7 +277,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         try {
             propagator->Running = true;
             propagator->assert_root();
-            res = propagator->Satisfiable ? sat : propagator->check();
+            res = propagator->check();
         }
         catch (std::exception& ex) {
             cout << "Error: " << ex.what() << endl;
@@ -243,17 +303,16 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
             }
             if (timeLeft < 1000 * 60 * 60 * 24)
                 cout << "Time left: " << timeLeft << "ms" << endl;
-            propagator->next_level();
+            if (propagator->next_level()) {
+                if (!silent)
+                    cout << "SAT because of exhaustion" << endl;
+                deleteCNF(cnf);
+                delete propagator;
+                return sat;
+            }
             delete propagator;
             propagator = new matrix_propagator(cnf, adtSolver, progParams, literalCnt);
             continue;
-        }
-        if (propagator->Satisfiable) {
-            if (!silent)
-                cout << "SAT because of polarity" << endl;
-            deleteCNF(cnf);
-            delete propagator;
-            return sat;
         }
 
         if (!silent)
@@ -263,6 +322,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
 
         if (silent) {
             deleteCNF(cnf);
+            delete propagator;
             return unsat;
         }
 
@@ -306,8 +366,8 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
 
 namespace std {
     template<>
-    struct hash<pvector<indexed_literal>> {
-        size_t operator()(const pvector<indexed_literal>& x) const {
+    struct hash<vector<indexed_literal*>> {
+        size_t operator()(const vector<indexed_literal*>& x) const {
             static const hash<indexed_literal> hash;
             size_t ret = 0;
             for (const auto& l: x) {
@@ -319,8 +379,8 @@ namespace std {
 }
 namespace std {
     template<>
-    struct equal_to<pvector<indexed_literal>> {
-        bool operator()(const pvector<indexed_literal>& x, const pvector<indexed_literal>& y) const {
+    struct equal_to<vector<indexed_literal*>> {
+        bool operator()(const vector<indexed_literal*>& x, const vector<indexed_literal*>& y) const {
             if (x.size() != y.size())
                 return false;
             for (unsigned i = 0; i < x.size(); i++) {
@@ -362,11 +422,10 @@ cnf<indexed_clause*> to_cnf(const z3::expr& input, ComplexADTSolver& adtSolver, 
         termAbstraction.try_emplace(*f, &solver, solver.GetId(f->name().str()));
     }
 
-    pvector<indexed_clause> newNonConjectureClauses;
-    pvector<indexed_clause> newConjectureClauses;
+    pvector<indexed_clause> newClauses;
 
     unordered_map<fo_literal, indexed_literal*> literalToIndexed;
-    unordered_set<pvector<indexed_literal>> clauses;//(OrderedArrayComparer<IndexedLiteral>());
+    unordered_set<pvector<indexed_literal>> clauses;
 
     unsigned clauseIdx = 0;
 
@@ -408,12 +467,13 @@ cnf<indexed_clause*> to_cnf(const z3::expr& input, ComplexADTSolver& adtSolver, 
             // Eliminate duplicate clauses
             continue;
         }
-        pvector<indexed_clause>& list = cnf.is_conjecture(i) ? newConjectureClauses : newNonConjectureClauses;
-        list.push_back(new indexed_clause(clauseIdx++, literals));
+        auto* cl = new indexed_clause(clauseIdx++, literals);
+        cl->Conjecture = entry.Conjecture;
+        newClauses.push_back(cl);
     }
 
     literalCnt = literalToIndexed.size();
-    return { std::move(newNonConjectureClauses), std::move(newConjectureClauses) };
+    return { std::move(newClauses) };
 }
 
 cnf<clause> to_cnf(z3::context& ctx, const z3::expr& input, bool polarity, z3::expr_vector& scopeVars, z3::sort_vector& scopeSorts,
@@ -475,10 +535,12 @@ cnf<clause> to_cnf(z3::context& ctx, const z3::expr& input, bool polarity, z3::e
             if (decl.arity() == 1 && decl.name().str() == "#") {
                 c = to_cnf(ctx, input.arg(0), polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
                 vector<clause> clauses;
-                clauses.reserve(c.nonConjectureClauses.size() + c.conjectureClauses.size());
-                add_range(clauses, c.nonConjectureClauses);
-                add_range(clauses, c.conjectureClauses);
-                return {vector<clause>(), clauses};
+                clauses.reserve(c.size());
+                add_range(clauses, c.clauses);
+                for (auto& clause: clauses) {
+                    clause.Conjecture = true;
+                }
+                return { clauses };
             }
             for (const auto& arg: input.args()) {
                 CollectTerm(arg, terms, visited);
@@ -489,7 +551,7 @@ cnf<clause> to_cnf(z3::context& ctx, const z3::expr& input, bool polarity, z3::e
                 atom = !atom;
             z3::expr_vector v(ctx);
             v.push_back(atom);
-            c = cnf<clause> ({clause(v, nameCache)});
+            c = cnf<clause> ({ clause(v, nameCache) });
             c[0].AddVariables(scopeVars);
             return c;
         }
@@ -498,7 +560,7 @@ cnf<clause> to_cnf(z3::context& ctx, const z3::expr& input, bool polarity, z3::e
         case Z3_OP_AND:
             switch (input.num_args()) {
                 case 0:
-                    return cnf<clause>::GetTrue()   ;
+                    return cnf<clause>::get_true()   ;
                 case 1:
                     return to_cnf(ctx, input.arg(0), polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
                 default: {
@@ -509,13 +571,13 @@ cnf<clause> to_cnf(z3::context& ctx, const z3::expr& input, bool polarity, z3::e
                         cnfs.push_back(to_cnf(ctx, input.arg(i), polarity, scopeVars, scopeSorts, substitutions,
                                               terms, nameCache, visited));
                     }
-                    return {cnfs};
+                    return { cnfs };
                 }
             }
         case Z3_OP_OR:
             switch (input.num_args()) {
                 case 0:
-                    return cnf<clause>::GetFalse();
+                    return cnf<clause>::get_false();
                 case 1:
                     return to_cnf(ctx, input.arg(0), polarity, scopeVars, scopeSorts, substitutions, terms, nameCache, visited);
                 default: {
@@ -538,6 +600,7 @@ cnf<clause> to_cnf(z3::context& ctx, const z3::expr& input, bool polarity, z3::e
                         for (int j = 0; j < cnf2.size(); j++) {
                             auto e2 = cnf2[i];
                             clauses.emplace_back(e1, e2);
+                            clauses.back().Conjecture = e1.Conjecture | e2.Conjecture;
                         }
                     }
                     return {clauses};

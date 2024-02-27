@@ -11,14 +11,19 @@ matrix_propagator::matrix_propagator(cnf<indexed_clause*>& cnf, ComplexADTSolver
 
     if (progParams.Mode == Core) {
         for (unsigned i = 0; i < matrix.size(); i++) {
+            if (matrix[i]->Ground && progParams.multiplicity[i] > 0) {
+                clauseLimitListExpr.push_back(m.mk_true());
+                continue;
+            }
             clauseLimitListExpr.push_back(m.mk_lit(new_observed_var(OPT("limit#" + to_string(i)))));
             clauseLimitMap.insert(make_pair(clauseLimitListExpr[i], i));
         }
 
         for (int i = 0; i < matrix.size(); i++) {
-            if (matrix[i]->Ground && progParams.multiplicity[i] == 0)
+            if (matrix[i]->Ground && progParams.multiplicity[i] > 0)
                 continue;
-            solver->assume(clauseLimitListExpr[i]->get_lit());
+            const int ass = clauseLimitListExpr[i]->get_lit();
+            solver->assume(ass);
         }
     }
 }
@@ -34,17 +39,18 @@ void matrix_propagator::create_instances() {
 
 bool matrix_propagator::next_level_core() {
     std::vector<int> core;
-    for (unsigned c = 0; c < matrix.size(); c++) {
-        if (solver->failed((signed) c + 1)) {
+    Log("Core contains: ");
+    for (int c = 0; c < clauseLimitListExpr.size(); c++) {
+        if (!clauseLimitListExpr[c]->is_true() && solver->failed(clauseLimitListExpr[c]->get_lit())) {
             progParams.priority[c]++;
             core.push_back(c);
+            Log("#" << c << ", ");
         }
     }
+    LogN("");
 
-    if (core.empty()) {
-        Satisfiable = true;
+    if (core.empty())
         return true;
-    }
 
     unsigned maxVar = 1;
     unsigned maxValue = 0;
@@ -58,7 +64,7 @@ bool matrix_propagator::next_level_core() {
     progParams.priority[maxVar] = 0;
     progParams.multiplicity[maxVar]++;
     assert(progParams.multiplicity[maxVar] <= 1 || !matrix[maxVar]->Ground);
-    Log("Increase clause #" + to_string(maxVar) + " to " + to_string(progParams.multiplicity[maxVar]));
+    LogN("Increase clause #" + to_string(maxVar) + " to " + to_string(progParams.multiplicity[maxVar]));
     return false;
 }
 
@@ -83,7 +89,7 @@ bool matrix_propagator::are_connected(const ground_literal& l1, const ground_lit
     return res;
 }
 
-void matrix_propagator::check_proof(z3::solver& uniSolver, const vector<clause_instance*>& chosen) {
+void matrix_propagator::check_proof(const vector<clause_instance*>& chosen) {
     if (!progParams.CheckProof)
         return;
 
@@ -129,8 +135,10 @@ clause_instance* matrix_propagator::GetGround(const indexed_clause* clause, unsi
 }
 
 void matrix_propagator::assert_root() {
-    for (unsigned i = 0; i < initClauses.size(); i++) {
-        solver->add(GetGround(initClauses[i], 0)->selector->get_lit());
+    assert(std::any_of(matrix.clauses.begin(), matrix.clauses.end(), [](const indexed_clause* c) { return c->Conjecture; }));
+    for (unsigned i = 0; i < matrix.size(); i++) {
+        if (matrix[i]->Conjecture)
+            solver->add(GetGround(matrix[i], 0)->selector->get_lit());
     }
     solver->add(0);
 }
@@ -329,32 +337,32 @@ void matrix_propagator::final() {
 
         if (progParams.Mode == Core) {
             for (auto elem: path) {
-                for (auto& cachedClause: cachedClauses) {
-                    if (cachedClause.empty())
-                        continue;
-                    unsigned literalCnt = cachedClause[0]->literals.size();
+                for (unsigned i = 0; i < matrix.size(); i++) {
+                    indexed_clause* cl = matrix[i];
+                    unsigned literalCnt =cl ->literals.size();
                     for (int j = 0; j < literalCnt; j++) {
-                        CacheUnification(elem.lit, cachedClause[0]->literals[j]);
+                        CacheUnification(elem.lit, *(cl->literals[j]));
                         const subterm_hint* unification = UnificationHints.get(
                                 elem.lit.Literal->Index,
-                                cachedClause[0]->literals[j].Literal->Index);
+                                cl->literals[j]->Index);
 
                         if (large_array::is_invalid(unification) ||
-                            elem.lit.Literal->polarity == cachedClause[0]->literals[j].Literal->polarity)
+                            elem.lit.Literal->polarity == cl->literals[j]->polarity)
                             continue;
 
                         unsigned maxId = 0;
+                        auto& cachedClause = cachedClauses[i];
                         for (; maxId < cachedClause.size(); maxId++) {
                             if (cachedClause[maxId]->value != undef)
                                 break;
                         }
                         if (maxId >= cachedClause.size()) {
-                            constraints.push_back(clauseLimitListExpr[cachedClause[0]->clause->Index]);
+                            constraints.push_back(m.mk_not(clauseLimitListExpr[i]));
                         }
                         else {
-                            vector<formula> constraints = {cachedClause[maxId]->selector};
-                            unification->GetPosConstraints(*this, elem.lit, cachedClause[maxId]->literals[j], constraints);
-                            constraints.push_back(m.mk_and(constraints));
+                            vector<formula> cnstr = {cachedClause[maxId]->selector };
+                            unification->GetPosConstraints(*this, elem.lit, cachedClause[maxId]->literals[j], cnstr);
+                            cnstr.push_back(m.mk_and(cnstr));
                         }
                     }
                 }
