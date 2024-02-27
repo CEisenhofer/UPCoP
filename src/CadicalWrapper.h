@@ -5,10 +5,15 @@
 
 #ifndef NDEBUG
 extern std::unordered_map<unsigned, std::string> names;
+inline void reset_names() {
+    names.clear();
+}
 #define Log(s) do { std::cout << s; } while (false)
 #define LogN(s) Log(s << std::endl)
 #define OPT(X) X
 #else
+inline void reset_names() {
+}
 #define Log(s) do { } while (false)
 #define LogN(s) Log(s)
 #define OPT(X)

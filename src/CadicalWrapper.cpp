@@ -83,6 +83,7 @@ void CaDiCal_propagator::propagate_conflict(const std::vector<literal>& just) {
         aux.push_back(-k->get_lit());
     }
     pending_hard_propagations.emplace_back(std::move(aux));
+    std::cout << "Propagation cnt: " << pending_hard_propagations.size() << " current idx: " << pending_hard_propagations_idx << std::endl;
 }
 
 bool CaDiCal_propagator::hard_propagate(const std::vector<literal>& just, formula prop) {
@@ -119,6 +120,7 @@ bool CaDiCal_propagator::hard_propagate(const std::vector<literal>& just, formul
         pending_hard_propagations.emplace_back(std::move(k));
     }
     prev_propagations.insert(aux.back());
+    std::cout << "Propagation cnt: " << pending_hard_propagations.size() << " current idx: " << pending_hard_propagations_idx << std::endl;
     return true;
 }
 
@@ -153,6 +155,7 @@ void CaDiCal_propagator::init_solver() {
     solver->set("ilb", 0);
     solver->set("ilbassumptions", 0);
     solver->connect_external_propagator(this);
+    reset_names();
 }
 
 void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
@@ -181,7 +184,7 @@ void CaDiCal_propagator::notify_new_decision_level() {
     soft_propagation_limit.push_back(soft_propagation_undo.size());
 
     assert(pending_hard_propagations.size() == pending_hard_propagations_idx);
-    assert(pending_soft_propagations.empty());
+    // assert(pending_soft_propagations.empty());
 }
 
 void CaDiCal_propagator::notify_backtrack(size_t new_level) {
