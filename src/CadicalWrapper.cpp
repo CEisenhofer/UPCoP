@@ -130,6 +130,22 @@ bool CaDiCal_propagator::soft_propagate(const std::vector<literal>& just, litera
     if (!soft_justifications[literal_to_idx(prop->get_lit())].empty())
         // Already propagated
         return true;
+    if (prop->is_false()) {
+        propagate_conflict(just);
+        return false;
+    }
+    bool val = false;
+    if (tryGetValue(interpretation, prop, val)) {
+        if (literal_to_polarity(prop) == val)
+            // Already assigned
+            return true;
+        std::vector<literal> just2;
+        just2.reserve(just.size() + 1);
+        add_range(just2, just);
+        just2.push_back(m.mk_not(prop));
+        propagate_conflict(just2);
+        return false;
+    }
 
     // TODO: Check if it is pending (not sure it is worth it...)
 #ifndef NDEBUG
@@ -172,7 +188,7 @@ void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
         });
 
         fixed(v, value);
-        if (is_conflict_flag)
+        if (is_conflict())
             return;
     }
 }
@@ -266,6 +282,12 @@ int CaDiCal_propagator::cb_add_external_clause_lit() {
         return 0;
     }
     return toAdd[hard_propagation_read_idx++];
+}
+
+int CaDiCal_propagator::cb_decide() {
+    literal d = decide();
+    assert(!contains_key(interpretation, d));
+    return d->get_lit();
 }
 
 const literal_term* literal_term::get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) {

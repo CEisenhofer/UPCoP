@@ -31,7 +31,7 @@ class or_term;
 typedef literal_term* literal;
 #define literal_to_string(X) (X)->to_string()
 #define literal_to_atom(X) mk_lit(abs((X)->get_lit()))
-#define literal_to_polarity(X) ((X)->get_lit() > 0)
+#define literal_to_polarity(X) ((bool)((X)->get_lit() > 0))
 #define literal_to_negate(X) mk_lit(-((X)->get_lit()))
 typedef formula_term* formula;
 
@@ -433,23 +433,27 @@ protected:
 
     virtual void fixed(literal lit, bool value) = 0;
 
-    void notify_assignment(const vector<int>& lits) override;
+    void notify_assignment(const vector<int>& lits) final;
 
-    void notify_new_decision_level() override;
+    void notify_new_decision_level() final;
 
-    void notify_backtrack(size_t new_level) override;
+    void notify_backtrack(size_t new_level) final;
 
     virtual void final() = 0;
 
-    bool cb_check_found_model(const std::vector<int>& model) override;
+    bool cb_check_found_model(const std::vector<int>& model) final;
 
-    int cb_propagate() override;
+    int cb_propagate() final;
 
-    int cb_add_reason_clause_lit(int propagated_lit) override;
+    int cb_add_reason_clause_lit(int propagated_lit) final;
 
 protected:
 
-    bool cb_has_external_clause(bool& is_forgettable) override;
+    bool cb_has_external_clause(bool& is_forgettable) final;
 
-    int cb_add_external_clause_lit() override;
+    int cb_add_external_clause_lit() final;
+
+    int cb_decide() final;
+
+    virtual literal decide() = 0;
 };

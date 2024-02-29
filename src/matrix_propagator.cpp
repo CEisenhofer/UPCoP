@@ -209,8 +209,13 @@ void matrix_propagator::fixed2(literal_term* e, bool value) {
         propagate({ e }, GetGround(info->clause, i - 1)->selector);
     }*/
 
-    if (info->copy_idx > 0 && cachedClauses[c][info->copy_idx - 1]->value != sat)
-        soft_propagate({ e }, GetGround(info->clause, info->copy_idx - 1)->selector);
+    if (info->copy_idx > 0) {
+        auto val = cachedClauses[c][info->copy_idx - 1]->value;
+        if (val != sat) {
+            if (!soft_propagate({e}, GetGround(info->clause, info->copy_idx - 1)->selector))
+                return;
+        }
+    }
 
 #ifdef OPT_false
     if (progParams.Mode == Rectangle) {
@@ -420,4 +425,17 @@ void matrix_propagator::FindPath(int clauseIdx, const vector<clause_instance*>& 
             return;
         path.pop_back();
     }
+}
+
+literal matrix_propagator::decide() {
+    for (unsigned i = 0; i < cachedClauses.size(); i++) {
+        for (unsigned j = 0; j < cachedClauses[i].size(); j++) {
+            if (cachedClauses[i][j]->value == unsat)
+                break;
+            if (cachedClauses[i][j]->value == undef) {
+                return cachedClauses[i][j]->selector;
+            }
+        }
+    }
+    return m.mk_false();
 }

@@ -111,6 +111,10 @@ public:
 
     void final() override;
 
+    literal decide() override;
+
+public:
+
     void FindPath(int clauseIdx, const vector<clause_instance*>& clauses, vector<path_element>& path, vector<vector<path_element>>& foundPaths, int limit);
 
     void PrintProof(z3::solver& uniSolver, unordered_map<term_instance*, string>& prettyNames, unordered_map<unsigned, int>& usedClauses) {
