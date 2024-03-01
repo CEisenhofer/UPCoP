@@ -13,7 +13,6 @@ class ComplexADTSolver {
     unordered_map<equality, literal> eqToExpr;
     unordered_map<lessThan, literal> lessToExpr;
 
-    unordered_map<literal, bool> interpretation;
     propagator_base* prop = nullptr;
 
 public:

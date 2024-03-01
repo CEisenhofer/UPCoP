@@ -38,19 +38,60 @@ void matrix_propagator::create_instances() {
 }
 
 bool matrix_propagator::next_level_core() {
-    std::vector<int> core;
+    // Try to minimize the core by brute force
+    unsigned prev = UINT_MAX;
+    std::vector<unsigned> core;
+    std::vector<unsigned> prevCore;
+    std::vector<unsigned> notFailed;
     Log("Core contains: ");
-    for (int c = 0; c < clauseLimitListExpr.size(); c++) {
-        if (!clauseLimitListExpr[c]->is_true() && solver->failed(clauseLimitListExpr[c]->get_lit())) {
-            progParams.priority[c]++;
-            core.push_back(c);
-            Log("#" << c << ", ");
+    for (unsigned c = 0; c < clauseLimitListExpr.size(); c++) {
+        if (!clauseLimitListExpr[c]->is_true()) {
+            if (solver->failed(clauseLimitListExpr[c]->get_lit())) {
+                progParams.priority[c]++;
+                core.push_back(c);
+            }
+            else {
+                notFailed.push_back(c);
+            }
         }
     }
+    for (unsigned i = 0; i < core.size(); i++) {
+        Log("#" << core[i]);
+        if (i < core.size() - 1)
+            Log(", ");
+    }
     LogN("");
+    for (unsigned i = core.)
+    while (true) {
+        core.clear();
+        LogN("");
 
-    if (core.empty())
-        return true;
+        if (core.empty() && !solver->constraint_failed())
+            return true;
+        if (core.size() == prev)
+            break;
+        prev = (unsigned)core.size();
+        if (prev == 0 && solver->constraint_failed()) {
+            core = std::move(prevCore);
+            LogN("Fallback to previous core");
+            break;
+        }
+
+        prevCore = std::move(core);
+
+        // Let's fix the interpretation
+        for (int c : notFailed) {
+            solver->clause(clauseLimitListExpr[c]->get_lit());
+        }
+
+        // For the remaining we don't know; let's minimize
+        for (int c : prevCore) {
+            solver->constrain(clauseLimitListExpr[c]->get_lit());
+        }
+        solver->constrain(0);
+        auto res = solver->solve();
+        assert(res == 20);
+    }
 
     unsigned maxVar = 1;
     unsigned maxValue = 0;
@@ -143,14 +184,17 @@ void matrix_propagator::assert_root() {
     solver->add(0);
 }
 
+vector<literal> just;
+vector<literal> prop;
+
 void matrix_propagator::pb_clause_limit() {
     if (progParams.Mode != Rectangle)
         return;
 
     if (chosen.size() == lvl) {
         LogN("Enforcing upper limit");
-        vector<literal> just;
-        vector<literal> prop;
+        just.clear();
+        prop.clear();
         just.reserve(chosen.size());
         prop.reserve(allClauses.size() - (chosen.size() + not_chosen.size()));
 
@@ -168,8 +212,8 @@ void matrix_propagator::pb_clause_limit() {
     // both cases can apply
     if (allClauses.size() - not_chosen.size() == lvl) {
         LogN("Enforcing lower limit");
-        vector<literal> just;
-        vector<literal> prop;
+        just.clear();
+        prop.clear();
         just.reserve(not_chosen.size());
         prop.reserve(allClauses.size() - (chosen.size() + not_chosen.size()));
 
@@ -217,23 +261,33 @@ void matrix_propagator::fixed2(literal_term* e, bool value) {
         }
     }
 
-#ifdef OPT_false
-    if (progParams.Mode == Rectangle) {
-            // For rect it gets better; for core worse...
-            CreateTautologyConstraints(info.Clause);
-            for (auto& constraint : info.Clause.TautologyConstraints) {
-                GroundLiteral lit1 = info.Literals[constraint.lit1];
-                GroundLiteral lit2 = info.Literals[constraint.conflicts.lit2];
-                literal neq = constraint.conflicts.hint.GetNegConstraints(this, lit1, lit2);
-                propagate(new[] { e }, neq);
-            }
-        }
-#endif
     info->value = sat;
     chosen.push_back(info);
     add_undo([&]() { chosen.back()->value = undef; chosen.pop_back(); });
 
     if (!info->propagated) {
+        // Tautology elimination
+        for (int k = 0; k < info->literals.size(); k++) {
+            for (int l = k + 1; l < info->literals.size(); l++) {
+                if (info->literals[k].Literal->polarity != info->literals[l].Literal->polarity &&
+                    info->literals[k].Literal->nameID == info->literals[l].Literal->nameID) {
+
+                    // TODO: Store tautology constraints
+                    auto* diseq = CollectConstrainUnifiable(info->literals[k], *(info->literals[l].Literal));
+                    if (diseq == nullptr)
+                        continue;
+                    // Clause contains two complementary literals
+                    // Why did the simplifier not remove those?!
+                    assert(!diseq->tautology());
+                    // clause->TautologyConstraints->emplace_back(k, l, diseq);
+
+                    formula neq = diseq->GetNegConstraints(*this, info->literals[k], info->literals[l]);
+                    hard_propagate({ e }, neq);
+                    delete diseq;
+                }
+            }
+        }
+
         if (!PropagateRules(e, info))
             return;
         info->propagated = true;
@@ -289,7 +343,7 @@ formula_term* matrix_propagator::connect_literal(clause_instance* info, const gr
                         ? m.mk_and({
                                            cachedClauses[i].back()->selector,
                                            m.mk_not(clauseLimitListExpr[i]),
-                                   })
+                                   }, true)
                         :
                         m.mk_not(clauseLimitListExpr[i])
                 );
@@ -428,7 +482,7 @@ void matrix_propagator::FindPath(int clauseIdx, const vector<clause_instance*>& 
 }
 
 literal matrix_propagator::decide() {
-    for (unsigned i = 0; i < cachedClauses.size(); i++) {
+    /*for (unsigned i = 0; i < cachedClauses.size(); i++) {
         for (unsigned j = 0; j < cachedClauses[i].size(); j++) {
             if (cachedClauses[i][j]->value == unsat)
                 break;
@@ -436,6 +490,6 @@ literal matrix_propagator::decide() {
                 return cachedClauses[i][j]->selector;
             }
         }
-    }
+    }*/
     return m.mk_false();
 }

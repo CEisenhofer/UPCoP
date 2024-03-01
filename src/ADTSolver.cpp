@@ -8,7 +8,6 @@ ComplexADTSolver::~ComplexADTSolver() {
 
 void ComplexADTSolver::reset(propagator_base* propagator) {
     prop = propagator;
-    interpretation.clear();
     exprToEq.clear();
     exprToLess.clear();
     eqToExpr.clear();
@@ -41,8 +40,6 @@ bool ComplexADTSolver::Asserted(literal e, bool isTrue) {
     if (!tryGetValue(exprToEq, e, info))
         return false;
     inv_cnt++;
-    interpretation.insert(make_pair(e, isTrue));
-    prop->add_undo([this, e]() { interpretation.erase(e); });
     assert(info.just.size() == 1 && typeid(*(info.just[0])) == typeid(LiteralJustification) &&
            ((LiteralJustification*) info.just[0])->lit == e);
     try {

@@ -38,11 +38,11 @@ void CaDiCal_propagator::output_literals(const std::vector<literal>& lit) const 
     std::vector<literal> wrong_val;
     for (unsigned i = 0; i < lit.size(); i++) {
         literal j = lit[i];
-        auto it = interpretation.find(j);
-        if (it == interpretation.end()){
+        bool val = false;
+        if (!get_value(j, val)) {
             unassigned.push_back(j);
         }
-        else if (it->second != literal_to_polarity(j)) {
+        else if (val != literal_to_polarity(j)) {
             wrong_val.push_back(j);
         }
         Log(literal_to_string(j));
@@ -56,7 +56,7 @@ void CaDiCal_propagator::output_literals(const std::vector<literal>& lit) const 
     }
     if (!unassigned.empty()) {
         for (const auto* j : unassigned) {
-            LogN("Unassigned: " << literal_to_string(j));
+            LogN("\nUnassigned: " << literal_to_string(j));
         }
     }
     assert(wrong_val.empty() && unassigned.empty());
@@ -69,7 +69,7 @@ void CaDiCal_propagator::propagate_conflict(const std::vector<literal>& just) {
     if (is_conflict_flag)
         return;
     incCnt++;
-    assert(just.size() > 1); // No general problem with that, but this looks suspicious...
+    // assert(just.size() > 1); // No general problem with that, but this looks suspicious...
     is_conflict_flag = true;
 #ifndef NDEBUG
     Log("Conflict (hard) [" << incCnt++ << "]: ");
@@ -124,6 +124,8 @@ bool CaDiCal_propagator::hard_propagate(const std::vector<literal>& just, formul
     return true;
 }
 
+std::vector<literal> j;
+
 bool CaDiCal_propagator::soft_propagate(const std::vector<literal>& just, literal prop) {
     if (is_conflict_flag)
         return false;
@@ -135,7 +137,7 @@ bool CaDiCal_propagator::soft_propagate(const std::vector<literal>& just, litera
         return false;
     }
     bool val = false;
-    if (tryGetValue(interpretation, prop, val)) {
+    if (get_value(prop, val)) {
         if (literal_to_polarity(prop) == val)
             // Already assigned
             return true;
@@ -178,13 +180,14 @@ void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
     for (int lit : lits) {
         bool value = lit > 0;
 
-        literal v = m.mk_lit(abs(lit));
+        const unsigned id = abs(lit);
+        literal v = m.mk_lit(id);
         LogN("Fixed: " << literal_to_string(v) << " := " << value << " [" << lit << "]");
         assert(hard_propagation_read_idx == 0);
-        assert(interpretation.find(v) == interpretation.end());
-        interpretation.insert(std::make_pair(v, value));
-        undo_stack.emplace_back([this, v]() {
-            interpretation.erase(v);
+        assert(!has_value(v));
+        interpretation[id - 1] = value ? sat : unsat;
+        undo_stack.emplace_back([this, id]() {
+            interpretation[id - 1] = undef;
         });
 
         fixed(v, value);
@@ -286,7 +289,7 @@ int CaDiCal_propagator::cb_add_external_clause_lit() {
 
 int CaDiCal_propagator::cb_decide() {
     literal d = decide();
-    assert(!contains_key(interpretation, d));
+    assert(!has_value(d));
     return d->get_lit();
 }
 
@@ -327,13 +330,15 @@ const literal_term* and_term::get_lits(CaDiCal_propagator& propagator, std::vect
     for (int arg: argLits) {
         aux.emplace_back(std::vector<int>({-var_id, arg}));
     }
-    std::vector<int> prop;
-    prop.reserve(1 + argLits.size());
-    prop.push_back((signed)var_id);
-    for (int arg: argLits) {
-        prop.push_back(-arg);
+    if (!positive) {
+        std::vector<int> prop;
+        prop.reserve(1 + argLits.size());
+        prop.push_back((signed) var_id);
+        for (int arg: argLits) {
+            prop.push_back(-arg);
+        }
+        aux.emplace_back(std::move(prop));
     }
-    aux.emplace_back(std::move(prop));
     return manager.mk_lit(var_id);
 }
 
@@ -352,8 +357,10 @@ const literal_term* or_term::get_lits(CaDiCal_propagator& propagator, std::vecto
 #else
     var_id = propagator.new_observed_var(OPT("<" + to_string() + ">"));
 #endif
-    for (int arg: argLits) {
-        aux.emplace_back(std::vector<int>({-arg, (signed)var_id}));
+    if (!positive) {
+        for (int arg: argLits) {
+            aux.emplace_back(std::vector<int>({-arg, (signed) var_id}));
+        }
     }
     std::vector<int> prop;
     prop.reserve(1 + argLits.size());
@@ -432,7 +439,7 @@ formula_term* formula_manager::mk_not(formula_term* c) {
     return ret;
 }
 
-formula_term* formula_manager::mk_or(std::vector<formula_term*> c) {
+formula_term* formula_manager::mk_or(std::vector<formula_term*> c, bool positive) {
     sort(c.begin(), c.end(), [](formula_term* a, formula_term* b) {
         return a->get_ast_id() < b->get_ast_id();
     });
@@ -457,14 +464,16 @@ formula_term* formula_manager::mk_or(std::vector<formula_term*> c) {
         return c[0];
     c.resize(j);
     auto it = or_cache.find(c);
-    if (it != or_cache.end())
+    if (it != or_cache.end()) {
+        assert(it->second->is_positive() == positive);
         return it->second;
-    auto* ret = new or_term(*this, c);
+    }
+    auto* ret = new or_term(*this, c, positive);
     or_cache.insert(std::make_pair(c, ret));
     return ret;
 }
 
-formula_term* formula_manager::mk_and(std::vector<formula_term*> c) {
+formula_term* formula_manager::mk_and(std::vector<formula_term*> c, bool positive) {
     sort(c.begin(), c.end(), [](formula_term* a, formula_term* b) {
         return a->get_ast_id() < b->get_ast_id();
     });
@@ -489,14 +498,16 @@ formula_term* formula_manager::mk_and(std::vector<formula_term*> c) {
         return c[0];
     c.resize(j);
     auto it = and_cache.find(c);
-    if (it != and_cache.end())
+    if (it != and_cache.end()) {
+        assert(it->second->is_positive() == positive);
         return it->second;
-    auto* ret = new and_term(*this, c);
+    }
+    auto* ret = new and_term(*this, c, positive);
     and_cache.insert(std::make_pair(c, ret));
     return ret;
 }
 
-formula_manager::formula_manager() {
+formula_manager::formula_manager(CaDiCal_propagator* propagator) : propagator(propagator) {
 #ifndef NDEBUG
     names.insert(std::make_pair(0, "false"));
 #endif
@@ -508,4 +519,8 @@ formula_manager::~formula_manager() {
     for (auto* f: id_to_formula) {
         delete f;
     }
+}
+
+void formula_manager::register_formula(formula_term* term) {
+    id_to_formula.push_back(term);
 }

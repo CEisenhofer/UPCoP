@@ -60,6 +60,7 @@ namespace std {
 class formula_manager {
     friend class formula_term;
     friend class CaDiCal_propagator;
+    CaDiCal_propagator* propagator;
     true_term* trueTerm;
     false_term* falseTerm;
 
@@ -84,9 +85,9 @@ public:
     literal_term* mk_not(literal_term* c);
     formula_term* mk_not(formula_term* c);
 
-    formula_term* mk_or(std::vector<formula_term*> c);
+    formula_term* mk_or(std::vector<formula_term*> c, bool positive = false);
 
-    formula_term* mk_and(std::vector<formula_term*> c);
+    formula_term* mk_and(std::vector<formula_term*> c, bool positive = false);
 
 #ifndef NDEBUG
     formula_term* mk_or_slow(const std::vector<literal_term*>& c){
@@ -98,7 +99,7 @@ public:
     }
 #endif
 
-    formula_manager();
+    formula_manager(CaDiCal_propagator* propagator);
     ~formula_manager();
 
     bool is_true(const formula_term* t) const {
@@ -108,6 +109,8 @@ public:
     bool is_false(const formula_term* t) const {
         return t == (formula_term*)falseTerm;
     }
+
+    void register_formula(formula_term* term);
 };
 
 class formula_term {
@@ -120,7 +123,7 @@ protected:
     int var_id = 0;
 
     explicit formula_term(formula_manager& manager) : ast_id(manager.id_to_formula.size()), manager(manager) {
-        manager.id_to_formula.push_back(this);
+        manager.register_formula(this);
     }
 
 public:
@@ -249,10 +252,16 @@ class complex_term : public formula_term {
 protected:
 
     const std::vector<formula_term*> args;
+    const bool positive;
 
 public:
 
-    explicit complex_term(formula_manager& m, std::vector<formula_term*> args) : formula_term(m), args(std::move(args)) {
+    bool is_positive() const {
+        return positive;
+    }
+
+    explicit complex_term(formula_manager& m, std::vector<formula_term*> args, bool positive) :
+                                                                formula_term(m), args(std::move(args)), positive(positive) {
         assert(this->args.size() > 1);
     }
 };
@@ -261,7 +270,9 @@ class and_term : public complex_term {
     const std::string name;
 
 public:
-    explicit and_term(formula_manager& m, std::vector<formula_term*> args) : complex_term(m, std::move(args)), name(string_join(this->args, " && ")) {
+    explicit and_term(formula_manager& m, std::vector<formula_term*> args, bool positive) :
+                                                                complex_term(m, std::move(args), positive),
+                                                                name(string_join(this->args, " && ")) {
     }
 
     std::string to_string() const final {
@@ -275,7 +286,8 @@ class or_term : public complex_term {
     const std::string name;
 
 public:
-    explicit or_term(formula_manager& m, std::vector<formula_term*> args) : complex_term(m, std::move(args)), name(string_join(this->args, " || ")) {
+    explicit or_term(formula_manager& m, std::vector<formula_term*> args, bool positive) :
+                                                               complex_term(m, std::move(args), positive), name(string_join(this->args, " || ")) {
     }
 
     std::string to_string() const final {
@@ -286,24 +298,15 @@ public:
 };
 
 enum tri_state : unsigned char {
-    sat, unsat, undef
+    undef = 0,
+    sat = 1,
+    unsat = 2,
 };
 
 typedef std::function<void()> action;
 
-struct literal_hash {
-    size_t operator()(const literal& x) const {
-        return abs(x->get_lit());
-    }
-};
-
-struct literal_eq {
-    bool operator()(const literal& x, const literal& y) const {
-        return abs(x->get_lit()) == abs(y->get_lit());
-    }
-};
-
 class CaDiCal_propagator : public CaDiCaL::ExternalPropagator {
+    friend class formula_manager;
 
 protected:
     std::vector<action> undo_stack;
@@ -322,7 +325,7 @@ private:
     std::vector<std::vector<int>> soft_justifications;
     unsigned soft_propagation_read_idx = 0;
 
-    std::unordered_map<literal, bool, literal_hash, literal_eq> interpretation;
+    std::vector<tri_state> interpretation;
 
     // for persistent propagation
     std::unordered_set<std::vector<int>> prev_propagations;
@@ -358,10 +361,6 @@ public:
         return (unsigned)solver->vars();
     }
 
-    bool val(int v) {
-        return solver->val(abs(v)) > 0;
-    }
-
 #ifndef NDEBUG
     void output_literals(const std::vector<literal>& lit) const;
 #endif
@@ -374,20 +373,20 @@ public:
 
 protected:
 
-    CaDiCal_propagator() {
+    CaDiCal_propagator() : m(this) {
         init_solver();
     }
 
-    unsigned decision_lvl() const {
-        return undo_stack_limit.size();
+    bool get_value(literal v, bool& value) const {
+        tri_state val = interpretation[abs(v->get_lit()) - 1];
+        if (val == undef)
+            return false;
+        value = val == sat;
+        return true;
     }
 
-    bool get_value(literal v, bool& value) const {
-        auto it = interpretation.find(v);
-        if (it == interpretation.end())
-            return false;
-        value = it->second;
-        return true;
+    bool has_value(literal v) const {
+        return interpretation[abs(v->get_lit()) - 1] != undef;
     }
 
     int new_var_raw() {
@@ -395,6 +394,8 @@ protected:
         soft_justifications.emplace_back();
         soft_justifications.emplace_back();
         assert(2 * var_cnt == soft_justifications.size());
+        interpretation.push_back(undef);
+        assert(var_cnt == interpretation.size());
         return newId;
     }
 
@@ -438,6 +439,12 @@ protected:
     void notify_new_decision_level() final;
 
     void notify_backtrack(size_t new_level) final;
+
+    void pop_to_root() {
+        if (undo_stack_limit.empty())
+            return;
+        notify_backtrack(0);
+    }
 
     virtual void final() = 0;
 
