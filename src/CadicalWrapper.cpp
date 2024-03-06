@@ -172,6 +172,7 @@ void CaDiCal_propagator::init_solver() {
     solver = new CaDiCaL::Solver();
     solver->set("ilb", 0);
     solver->set("ilbassumptions", 0);
+    solver->set("chrono", 0);
     solver->connect_external_propagator(this);
     reset_names();
 }
@@ -184,7 +185,11 @@ void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
         literal v = m.mk_lit(id);
         LogN("Fixed: " << literal_to_string(v) << " := " << value << " [" << lit << "]");
         assert(hard_propagation_read_idx == 0);
-        assert(!has_value(v));
+        bool prevValue = false;
+        if (get_value(v, prevValue)) {
+            assert(prevValue == value);
+            return;
+        }
         interpretation[id - 1] = value ? sat : unsat;
         undo_stack.emplace_back([this, id]() {
             interpretation[id - 1] = undef;
@@ -248,9 +253,13 @@ int CaDiCal_propagator::cb_propagate() {
         return 0;
     auto& [just, prop] = pending_soft_propagations.back();
     int ret = prop;
-    soft_justifications[literal_to_idx(ret)] = std::move(just);
-    soft_propagation_undo.push_back(literal_to_idx(ret));
+    const int idx = literal_to_idx(ret);
+    soft_justifications[idx] = std::move(just);
+    soft_propagation_undo.push_back(idx);
     pending_soft_propagations.pop_back();
+#ifdef PUSH_POP
+    undo_stack.emplace_back([this, idx](){ soft_justifications[idx].clear(); });
+#endif
     return ret;
 }
 
@@ -265,6 +274,10 @@ int CaDiCal_propagator::cb_add_reason_clause_lit(int propagated_lit) {
 
 
 bool CaDiCal_propagator::cb_has_external_clause(bool& is_forgettable) {
+#ifdef PUSH_POP
+    is_forgettable = true;
+    are_reasons_forgettable = true;
+#endif
     return pending_hard_propagations_idx < pending_hard_propagations.size();
 }
 

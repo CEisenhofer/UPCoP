@@ -263,7 +263,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
     }
 
     int timeLeft = progParams.Timeout == 0 ? INT_MAX : progParams.Timeout;
-    matrix_propagator* propagator = new matrix_propagator(cnf, adtSolver, progParams, literalCnt);
+    auto* propagator = new matrix_propagator(cnf, adtSolver, progParams, literalCnt);
 
     for (unsigned id = progParams.Depth; id < progParams.MaxDepth; id++) {
         start_watch();

@@ -1,6 +1,8 @@
 #include "propagator_base.h"
 #include <iostream>
 
+static int incCnt = 0;
+
 unsigned propagator_base::getRandom(unsigned min, unsigned max) const {
     assert(max > min);
     unsigned res = distribution(generator);
@@ -130,40 +132,19 @@ void propagator_base::CacheUnification(const ground_literal& l1, const indexed_l
     }
 }
 
-void propagator_base::CreateTautologyConstraints(indexed_clause& clause) {
-    /*
-    clause.TautologyConstraints.emplace();
-    auto ground = GetRootGround(clause);
-
-    for (int k = 0; k < clause.size(); k++) {
-        for (int l = k + 1; l < clause.size(); l++) {
-            if (
-                    clause[k]->polarity != clause[l]->polarity &&
-                    clause[k]->nameID == clause[l]->nameID) {
-
-                auto diseq = CollectConstrainUnifiable(ground[k], clause[l]);
-                if (diseq == nullptr)
-                    continue;
-                // Clause contains two complementary literals
-                // Why did the simplifier not remove those?!
-                assert(!diseq->tautology());
-                clause.TautologyConstraints->emplace_back(k, l, diseq);
-            }
-        }
-    }*/
-}
-
 void propagator_base::fixed(literal var, bool value) {
     if (is_conflict_flag)
         return;
     try {
+        incCnt++;
         if (term_solver.Asserted(var, value))
             return;
 
         fixed2(var, value);
     }
     catch (...) {
-        cout << "Crashed" << endl;
+        cout << "Crashed: " << incCnt << endl;
+        __builtin_trap();
         exit(131);
     }
 }

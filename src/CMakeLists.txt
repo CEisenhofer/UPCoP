@@ -12,6 +12,11 @@ elseif (CMAKE_BUILD_TYPE MATCHES Release)
     message(STATUS "Release build")
 endif ()
 
+if (NOLOG)
+    add_definitions(-DNOLOG)
+    message(STATUS "Manually disabled logging in debug")
+endif ()
+
 if (FORCE_NDEBUG)
     message(STATUS "Forcing NDEBUG")
     add_definitions(-DNDEBUG)

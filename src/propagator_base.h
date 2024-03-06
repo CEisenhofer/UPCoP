@@ -128,8 +128,6 @@ public:
 
 private:
 
-    void CreateTautologyConstraints(indexed_clause& clause);
-
     void fixed(literal var, bool value) override;
 
     virtual void fixed2(literal lit, bool value) = 0;

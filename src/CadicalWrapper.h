@@ -8,8 +8,13 @@ extern std::unordered_map<unsigned, std::string> names;
 inline void reset_names() {
     names.clear();
 }
+#ifndef NOLOG
 #define Log(s) do { std::cout << s; } while (false)
 #define LogN(s) Log(s << std::endl)
+#else
+#define Log(s) do { } while (false)
+#define LogN(s) Log(s)
+#endif
 #define OPT(X) X
 #else
 inline void reset_names() {

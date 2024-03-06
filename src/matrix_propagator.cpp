@@ -37,65 +37,92 @@ void matrix_propagator::create_instances() {
     }
 }
 
+static int callCnt = 0;
+
 bool matrix_propagator::next_level_core() {
     // Try to minimize the core by brute force
-    unsigned prev = UINT_MAX;
-    std::vector<unsigned> core;
-    std::vector<unsigned> prevCore;
+
+    std::vector<unsigned> required;
+    std::vector<unsigned> unknown;
     std::vector<unsigned> notFailed;
-    Log("Core contains: ");
-    for (unsigned c = 0; c < clauseLimitListExpr.size(); c++) {
-        if (!clauseLimitListExpr[c]->is_true()) {
-            if (solver->failed(clauseLimitListExpr[c]->get_lit())) {
-                progParams.priority[c]++;
-                core.push_back(c);
+    bool unsat = true;
+
+    for (unsigned i = 0; i < clauseLimitListExpr.size(); i++) {
+        if (!clauseLimitListExpr[i]->is_true())
+            unknown.push_back(i);
+    }
+
+    while (!unknown.empty()) {
+        notFailed.clear();
+        if (unsat) {
+            Log("Core contains: ");
+
+            for (unsigned j = unknown.size(); j > 0; j--) {
+                unsigned c = unknown[j - 1];
+                assert(!clauseLimitListExpr[c]->is_true());
+                if (!solver->failed(clauseLimitListExpr[c]->get_lit())) {
+                    notFailed.push_back(c);
+                    std::swap(unknown[c], unknown.back());
+                    unknown.pop_back();
+                }
             }
-            else {
-                notFailed.push_back(c);
+
+            for (unsigned j = 0; j < unknown.size(); j++) {
+                Log("#" << unknown[j]);
+                if (j < unknown.size() - 1)
+                    Log(", ");
             }
+            LogN("");
+
+            // Problematic; keep out for now...
+            /*for (unsigned c: notFailed) {
+                solver->clause((signed) clauseLimitListExpr[c]->get_lit());
+            }*/
+        }
+
+        if (unknown.empty())
+            break;
+
+        for (unsigned i = 0; i < unknown.size() - 1; i++) {
+            solver->assume((signed)clauseLimitListExpr[unknown[i]]->get_lit());
+        }
+
+        LogN("Trying to eliminate #" << unknown.back());
+
+        callCnt++;
+        int res = solver->solve();
+        unsat = res == 20;
+        const unsigned currentClause = unknown.back();
+        unknown.pop_back();
+        if (!unsat) {
+            LogN("Limit #" << currentClause << " required");
+            required.push_back(currentClause);
+            solver->clause((signed)clauseLimitListExpr[currentClause]->get_lit());
+        }
+        else {
+            LogN("Limit #" << currentClause << " redundant");
         }
     }
-    for (unsigned i = 0; i < core.size(); i++) {
-        Log("#" << core[i]);
-        if (i < core.size() - 1)
+
+    if (required.empty())
+        return true;
+
+    Log("Minimal core: ");
+
+    for (unsigned j = 0; j < required.size(); j++) {
+        Log("#" << required[j]);
+        if (j < required.size() - 1)
             Log(", ");
     }
     LogN("");
-    for (unsigned i = core.)
-    while (true) {
-        core.clear();
-        LogN("");
 
-        if (core.empty() && !solver->constraint_failed())
-            return true;
-        if (core.size() == prev)
-            break;
-        prev = (unsigned)core.size();
-        if (prev == 0 && solver->constraint_failed()) {
-            core = std::move(prevCore);
-            LogN("Fallback to previous core");
-            break;
-        }
-
-        prevCore = std::move(core);
-
-        // Let's fix the interpretation
-        for (int c : notFailed) {
-            solver->clause(clauseLimitListExpr[c]->get_lit());
-        }
-
-        // For the remaining we don't know; let's minimize
-        for (int c : prevCore) {
-            solver->constrain(clauseLimitListExpr[c]->get_lit());
-        }
-        solver->constrain(0);
-        auto res = solver->solve();
-        assert(res == 20);
+    for (unsigned c: required) {
+        progParams.priority[c]++;
     }
 
     unsigned maxVar = 1;
     unsigned maxValue = 0;
-    for (unsigned v: core) {
+    for (unsigned v: required) {
         if (progParams.priority[v] > maxValue) {
             maxVar = v;
             maxValue = progParams.priority[v];
@@ -188,11 +215,17 @@ vector<literal> just;
 vector<literal> prop;
 
 void matrix_propagator::pb_clause_limit() {
-    if (progParams.Mode != Rectangle)
+    if (progParams.Mode != Rectangle || pbPropagated)
         return;
 
-    if (chosen.size() == lvl) {
+    bool upperLimit = chosen.size() == lvl;
+    bool lowerLimit = allClauses.size() - not_chosen.size() == lvl;
+    assert(!(upperLimit && lowerLimit));
+
+    if (upperLimit) {
         LogN("Enforcing upper limit");
+        pbPropagated = true;
+        add_undo([this]() { pbPropagated = false; });
         just.clear();
         prop.clear();
         just.reserve(chosen.size());
@@ -202,16 +235,17 @@ void matrix_propagator::pb_clause_limit() {
             if (clause->value == sat)
                 just.push_back(clause->selector);
             else if (clause->value == undef)
-                prop.push_back(clause->selector);
+                prop.push_back(m.mk_not(clause->selector));
         }
 
         for (auto* p: prop) {
-            soft_propagate(just, m.mk_not(p));
+            soft_propagate(just, p);
         }
     }
-    // both cases can apply
-    if (allClauses.size() - not_chosen.size() == lvl) {
+    else if (lowerLimit) {
         LogN("Enforcing lower limit");
+        pbPropagated = true;
+        add_undo([this]() { pbPropagated = false; });
         just.clear();
         prop.clear();
         just.reserve(not_chosen.size());
@@ -233,8 +267,16 @@ void matrix_propagator::pb_clause_limit() {
 void matrix_propagator::fixed2(literal_term* e, bool value) {
 
     clause_instance* info = nullptr;
-    if (!tryGetValue(exprToInfo, e, info))
+    if (!tryGetValue(exprToInfo, e, info)) {
+        int lim = 0;
+        if (value)
+            return;
+        if (!hasLimFalse && tryGetValue(clauseLimitMap, e, lim)) {
+            hasLimFalse = true;
+            add_undo([this](){ hasLimFalse = false; });
+        }
         return;
+    }
 
     if (!value) {
         info->value = unsat;
@@ -265,7 +307,9 @@ void matrix_propagator::fixed2(literal_term* e, bool value) {
     chosen.push_back(info);
     add_undo([&]() { chosen.back()->value = undef; chosen.pop_back(); });
 
+#ifndef PUSH_POP
     if (!info->propagated) {
+#endif
         // Tautology elimination
         for (int k = 0; k < info->literals.size(); k++) {
             for (int l = k + 1; l < info->literals.size(); l++) {
@@ -290,8 +334,10 @@ void matrix_propagator::fixed2(literal_term* e, bool value) {
 
         if (!PropagateRules(e, info))
             return;
+#ifndef PUSH_POP
         info->propagated = true;
     }
+#endif
 
     pb_clause_limit();
 }
@@ -356,6 +402,10 @@ formula_term* matrix_propagator::connect_literal(clause_instance* info, const gr
 }
 
 void matrix_propagator::final() {
+
+    if (hasLimFalse)
+        // Used for unsat core minimization - this is a senseless state anyway...
+        return;
 
     assert(!chosen.empty());
     vector<vector<path_element>> paths;

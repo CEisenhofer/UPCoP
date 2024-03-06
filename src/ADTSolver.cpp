@@ -346,6 +346,8 @@ bool SimpleADTSolver::Unify(term_instance* lhs, term_instance* rhs, vector<Justi
     return false;
 }
 
+static int incCnt = 0;
+
 z3::check_result SimpleADTSolver::NonUnify(Lazy* lazy) {
     if (lazy->Solved)
         return z3::check_result::sat;
@@ -401,7 +403,7 @@ z3::check_result SimpleADTSolver::NonUnify(Lazy* lazy) {
             return z3::check_result::unknown;
         }
 
-        assert(!r1->t->Args.empty());
+        incCnt++;
         assert(r1->t->Args.size() == r2->t->Args.size());
 
         lazy->Justifications.push_back(new EqualityJustification(lazy->LHS, r1));
