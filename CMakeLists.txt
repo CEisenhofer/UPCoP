@@ -9,6 +9,7 @@ option(Z3_HEADER "Path to Z3 headers" "")
 option(CADICAL_HEADER "Path to Cadical headers" "")
 option(Z3_LIB "Path to Z3 library" "")
 option(CADICAL_LIB "Path to Cadical library" "")
+option(NOLOG "Don't output log" "")
 
 if ((NOT Z3_HEADER) OR (NOT Z3_LIB))
     message(FATAL_ERROR "Did not find Z3. Pass path directly to CMake via -D")

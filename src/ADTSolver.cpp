@@ -462,6 +462,8 @@ bool SimpleADTSolver::CheckCycle(term_instance* inst, term_instance* search, vec
 }
 
 bool SimpleADTSolver::NonUnify(literal just, term_instance* lhs, term_instance* rhs) {
+    return true;
+    // TODO: Why is it faster without this?!
     Lazy* lazy = new Lazy(lhs, rhs);
     lazy->Justifications.push_back(new LiteralJustification(just));
     propagator().add_undo([lazy]() { delete lazy; });
