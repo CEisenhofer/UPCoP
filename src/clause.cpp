@@ -18,25 +18,25 @@ clause::clause(const clause& c1, const clause& c2) {
         containedVars.insert(c);
 }
 
-indexed_clause::indexed_clause(unsigned index, const pvector<indexed_literal>& literals) :
+indexed_clause::indexed_clause(unsigned index, const vector<indexed_literal*>& literals) :
         literals(literals), Index(index), Ground(
         all_of(literals.cbegin(), literals.cend(),
                [](const indexed_literal* o1) {
-                    return all_of(o1->arg_bases.cbegin(), o1->arg_bases.cend(), [](const auto& o2) { return o2->Ground; });
+                    return all_of(o1->arg_bases.cbegin(), o1->arg_bases.cend(), [](const auto& o2) { return o2->is_ground(); });
                }
         )) {}
 
-string indexed_clause::ToString(int resolvedLiteralIdx) const {
+string indexed_clause::to_string(int resolvedLiteralIdx) const {
     if (literals.empty())
         return "false";
     if (literals.size() == 1)
-        return literals[0]->ToString();
+        return literals[0]->to_string();
     stringstream sb;
-    sb << '(' << literals[resolvedLiteralIdx]->ToString();
+    sb << '(' << literals[resolvedLiteralIdx]->to_string();
     for (int i = 0; i < literals.size(); i++) {
         if (i == resolvedLiteralIdx)
             continue;
-        sb << " || " << literals[i]->ToString();
+        sb << " || " << literals[i]->to_string();
     }
     sb << ')';
     return sb.str();

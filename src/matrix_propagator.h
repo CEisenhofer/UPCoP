@@ -18,6 +18,8 @@ struct clause_instance {
 #endif
     tri_state value;
     const vector<ground_literal> literals;
+    vector<equality> delayedRelevantTrue;
+    vector<equality> delayedRelevantFalse;
 
     clause_instance() = delete;
     clause_instance(clause_instance& other) = delete;
@@ -63,7 +65,7 @@ class matrix_propagator : public propagator_base {
     bool pbPropagated = false;
 
 public:
-    matrix_propagator(cnf<indexed_clause*>& cnf, ComplexADTSolver& adtSolver, ProgParams& progParams, unsigned literalCnt);
+    matrix_propagator(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt);
 
     ~matrix_propagator() override {
         for (auto& clause : allClauses) {
@@ -94,21 +96,21 @@ private:
 
 public:
 
-    clause_instance* get_clause_instance(const indexed_clause* clause, unsigned cpyIdx, literal selector);
+    clause_instance* create_clause_instance(const indexed_clause* clause, unsigned cpyIdx, literal selector);
 
     bool are_connected(const ground_literal& l1, const ground_literal& l2);
 
     void check_proof(const vector<clause_instance*>& chosen);
 
-    clause_instance* GetGround(const indexed_clause* clause, unsigned cpy);
+    clause_instance* get_ground(const indexed_clause* clause, unsigned cpy);
 
     void assert_root();
 
     void pb_clause_limit();
 
-    void fixed2(literal e, bool value) override;
+    void fixed(literal e, bool value) override;
 
-    bool PropagateRules(literal e, clause_instance* info) {
+    bool propagate_rules(literal e, clause_instance* info) {
         for (const auto& lit : info->literals) {
             if (!hard_propagate({ e }, connect_literal(info, lit)))
                 return false;
@@ -122,11 +124,9 @@ public:
 
     literal decide() override;
 
-public:
+    void find_path(int clauseIdx, const vector<clause_instance*>& clauses, vector<path_element>& path, vector<vector<path_element>>& foundPaths, int limit);
 
-    void FindPath(int clauseIdx, const vector<clause_instance*>& clauses, vector<path_element>& path, vector<vector<path_element>>& foundPaths, int limit);
-
-    void PrintProof(z3::solver& uniSolver, unordered_map<term_instance*, string>& prettyNames, unordered_map<unsigned, int>& usedClauses) {
+    void print_proof(z3::solver& uniSolver, unordered_map<term_instance*, string>& prettyNames, unordered_map<unsigned, int>& usedClauses) {
         int clauseCnt = 1;
         unordered_map<clause_instance*, int> clauseToCnt;
         sort(chosen.begin(), chosen.end(), [](const clause_instance* c1, const clause_instance* c2) {
@@ -137,7 +137,7 @@ public:
 
         for (auto& clause : chosen) {
             clauseToCnt.insert(make_pair(clause, clauseCnt));
-            std::cout << "Clause &" << clauseCnt++ << " (#" << clause->clause->Index << "/" << clause->copy_idx << "): " << ClauseToString(clause->literals, &prettyNames) << "\n";
+            std::cout << "Clause &" << clauseCnt++ << " (#" << clause->clause->Index << "/" << clause->copy_idx << "): " << clause_to_string(clause->literals, &prettyNames) << "\n";
             int cnt = 0;
             if (tryGetValue(usedClauses, clause->clause->Index, cnt))
                 usedClauses[clause->clause->Index] = cnt + 1;
@@ -154,12 +154,13 @@ public:
                         if (!are_connected(chosen[i]->literals[k], chosen[j]->literals[l]))
                             continue;
 
-                        std::cout << "Connected: &" << clauseToCnt[chosen[i]] << ": " << PrettyPrintLiteral(chosen[i]->literals[k], &prettyNames) << " and &" << clauseToCnt[chosen[j]] << ": " << PrettyPrintLiteral(chosen[j]->literals[l], &prettyNames) << "\n";
+                        std::cout << "Connected: &" << clauseToCnt[chosen[i]] << ": " << pretty_print_literal(chosen[i]->literals[k], &prettyNames) << " and &" << clauseToCnt[chosen[j]] << ": " << pretty_print_literal(
+                                chosen[j]->literals[l], &prettyNames) << "\n";
 
-                        for (int m = 0; m < chosen[i]->literals[k].GetArity(); m++) {
-                            bool res = term_solver.Asserted(this->m.mk_true(),
-                                                            chosen[i]->literals[k].Literal->arg_bases[m]->GetInstance(chosen[i]->copy_idx),
-                                                            chosen[j]->literals[l].Literal->arg_bases[m]->GetInstance(chosen[j]->copy_idx), true);
+                        for (int m = 0; m < chosen[i]->literals[k].arity(); m++) {
+                            bool res = term_solver.asserted(this->m.mk_true(),
+                                                            chosen[i]->literals[k].lit->arg_bases[m]->get_instance(chosen[i]->copy_idx, *this),
+                                                            chosen[j]->literals[l].lit->arg_bases[m]->get_instance(chosen[j]->copy_idx, *this), true);
                             if (!res)
                                 throw solving_exception("Failed unification");
                         }

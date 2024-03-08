@@ -19,6 +19,6 @@ fo_literal::fo_literal(z3::expr e, unordered_map<string, unsigned>& nameCache) :
     }
 }
 
-string fo_literal::ToString() const {
-    return propagator_base::PrettyPrintLiteral(this, 0, nullptr);
+string fo_literal::to_string() const {
+    return propagator_base::pretty_print_literal(this, 0, nullptr);
 }

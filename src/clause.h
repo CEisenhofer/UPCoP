@@ -63,7 +63,7 @@ struct TautologyHint {
 };
 
 struct indexed_clause {
-    const pvector<indexed_literal> literals;
+    const vector<indexed_literal*> literals;
     const unsigned Index;
     bool Ground;
     bool Conjecture = false;
@@ -82,7 +82,7 @@ struct indexed_clause {
 
     indexed_clause& operator=(const indexed_clause&) = delete;
 
-    indexed_clause(unsigned index, const pvector<indexed_literal>& literals);
+    indexed_clause(unsigned index, const vector<indexed_literal*>& literals);
 
     bool operator==(const indexed_clause& c) const {
         assert((Index == c.Index) == (this == &c));
@@ -94,10 +94,10 @@ struct indexed_clause {
         return !(*this == c);
     }
 
-    string ToString(int resolvedLiteralIdx) const;
+    string to_string(int resolvedLiteralIdx) const;
 
-    inline string ToString() const {
-        return ToString(0);
+    inline string to_string() const {
+        return to_string(0);
     }
 };
 

@@ -17,6 +17,11 @@ if (NOLOG)
     message(STATUS "Manually disabled logging in debug")
 endif ()
 
+if (DIMACS)
+    add_definitions(-DDIMACS)
+    message(STATUS "Enabled dimacs output")
+endif ()
+
 if (FORCE_NDEBUG)
     message(STATUS "Forcing NDEBUG")
     add_definitions(-DNDEBUG)
@@ -30,7 +35,7 @@ add_executable(UPCoP
         term.cpp
         propagator_base.cpp
         matrix_propagator.cpp
-        ADTSolver.cpp
+        adt_solver.cpp
         cnf.h
         clause.cpp
         clause.h

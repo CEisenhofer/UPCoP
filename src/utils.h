@@ -1,5 +1,7 @@
 #pragma once
 
+// #define PUSH_POP
+
 #include <optional>
 #include <algorithm>
 #include <sstream>
@@ -17,11 +19,6 @@
 #endif
 
 using namespace std;
-
-// typedef vector<expr> expr_vector;
-
-template <typename T>
-using pvector = vector<T*>;
 
 inline string to_lower(const string& s) {
     string ret = s;
@@ -237,3 +234,32 @@ struct solving_exception : public exception {
         return msg.c_str();
     }
 };
+
+template<typename T>
+inline std::string string_join(const std::vector<T*>& args, const std::string& sep) {
+    assert(!args.empty());
+    if (args.size() == 1)
+        return args[0]->to_string();
+    std::stringstream sb;
+    sb << "(" << args[0]->to_string();
+    for (unsigned i = 1; i < args.size(); i++) {
+        sb << sep << args[i]->to_string();
+    }
+    sb << ")";
+    return sb.str();
+}
+
+
+template<typename T>
+inline std::string string_join(const std::vector<T>& args, const std::string& sep) {
+    assert(!args.empty());
+    if (args.size() == 1)
+        return args[0].to_string();
+    std::stringstream sb;
+    sb << "(" << args[0].to_string();
+    for (unsigned i = 1; i < args.size(); i++) {
+        sb << sep << args[i].to_string();
+    }
+    sb << ")";
+    return sb.str();
+}

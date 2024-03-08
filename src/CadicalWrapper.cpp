@@ -1,5 +1,4 @@
 #include "CadicalWrapper.h"
-#include <iostream>
 
 #ifndef NDEBUG
 std::unordered_map<unsigned, std::string> names;
@@ -63,16 +62,15 @@ void CaDiCal_propagator::output_literals(const std::vector<literal>& lit) const 
 }
 #endif
 
-static int incCnt = 0;
+static unsigned incCnt = 0;
 
 void CaDiCal_propagator::propagate_conflict(const std::vector<literal>& just) {
     if (is_conflict_flag)
         return;
-    incCnt++;
     // assert(just.size() > 1); // No general problem with that, but this looks suspicious...
     is_conflict_flag = true;
 #ifndef NDEBUG
-    Log("Conflict (hard) [" << incCnt++ << "]: ");
+    Log("conflict (hard) [" << incCnt++ << "]: ");
     output_literals(just);
     LogN("");
 #endif
@@ -82,8 +80,15 @@ void CaDiCal_propagator::propagate_conflict(const std::vector<literal>& just) {
     for (literal k: just) {
         aux.push_back(-k->get_lit());
     }
+
+#ifdef DIMACS
+    for (int l: aux) {
+        dimacs << l << " ";
+    }
+    dimacs << "0\n";
+#endif
+
     pending_hard_propagations.emplace_back(std::move(aux));
-    // std::cout << "Propagation cnt: " << pending_hard_propagations.size() << " current idx: " << pending_hard_propagations_idx << std::endl;
 }
 
 bool CaDiCal_propagator::hard_propagate(const std::vector<literal>& just, formula prop) {
@@ -117,9 +122,22 @@ bool CaDiCal_propagator::hard_propagate(const std::vector<literal>& just, formul
         return true;
     }
     for (auto& k: aux) {
+#ifdef DIMACS
+        for (int l: k) {
+            dimacs << l << " ";
+        }
+        dimacs << "0\n";
+#endif
         pending_hard_propagations.emplace_back(std::move(k));
     }
     prev_propagations.insert(aux.back());
+
+#ifdef PUSH_POP
+    std::vector<int> aux2 = std::move(aux.back());
+    undo_stack.emplace_back([this, aux2]() {
+        prev_propagations.erase(aux2);
+    });
+#endif
     // std::cout << "Propagation cnt: " << pending_hard_propagations.size() << " current idx: " << pending_hard_propagations_idx << std::endl;
     return true;
 }
@@ -149,7 +167,7 @@ bool CaDiCal_propagator::soft_propagate(const std::vector<literal>& just, litera
         return false;
     }
 
-    // TODO: Check if it is pending (not sure it is worth it...)
+        // TODO: Check if it is pending (not sure it is worth it...)
 #ifndef NDEBUG
     Log("Propagating (soft) [" << incCnt++ << "]: ");
     output_literals(just);
@@ -164,6 +182,14 @@ bool CaDiCal_propagator::soft_propagate(const std::vector<literal>& just, litera
     }
     const int propLit = prop->get_lit();
     j.push_back(propLit);
+
+#ifdef DIMACS
+    for (int l: j) {
+        dimacs << l << " ";
+    }
+    dimacs << "0\n";
+#endif
+
     pending_soft_propagations.emplace_back(std::move(j), propLit);
     return true;
 }
@@ -172,7 +198,8 @@ void CaDiCal_propagator::init_solver() {
     solver = new CaDiCaL::Solver();
     solver->set("ilb", 0);
     solver->set("ilbassumptions", 0);
-    solver->set("chrono", 0);
+    // solver->set("chrono", 0);
+    // solver->set("phase", 0);
     solver->connect_external_propagator(this);
     reset_names();
 }
@@ -312,12 +339,16 @@ const literal_term* literal_term::get_lits(CaDiCal_propagator& propagator, std::
 
 const literal_term* not_term::get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) {
     assert(!t->is_true() && !t->is_false());
-    if (var_id != 0)
+
+    if (var_id == 0)
+        var_id = propagator.new_observed_var(OPT("<" + to_string() + ">"));
+    else if (active)
         return manager.mk_lit(var_id);
-#ifdef NDEBUG
-    var_id = propagator.new_observed_var();
-#else
-    var_id = propagator.new_observed_var(OPT("<" + to_string() + ">"));
+    else
+        propagator.observe_again(var_id);
+#ifdef PUSH_POP
+    active = true;
+    propagator.add_undo([this, &propagator]() { propagator.observe_remove(var_id);  active = false; });
 #endif
     const formula_term* arg = t->get_lits(propagator, aux);
     aux.emplace_back(std::vector<int>({-var_id, -arg->get_var_id()}));
@@ -326,8 +357,16 @@ const literal_term* not_term::get_lits(CaDiCal_propagator& propagator, std::vect
 }
 
 const literal_term* and_term::get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) {
-    if (var_id != 0)
+    if (var_id == 0)
+        var_id = propagator.new_observed_var(OPT("<" + to_string() + ">"));
+    else if (active)
         return manager.mk_lit(var_id);
+    else
+        propagator.observe_again(var_id);
+#ifdef PUSH_POP
+    active = true;
+    propagator.add_undo([this, &propagator]() { propagator.observe_remove(var_id);  active = false; });
+#endif
     assert(args.size() > 1);
     std::vector<int> argLits;
     argLits.reserve(args.size());
@@ -335,11 +374,6 @@ const literal_term* and_term::get_lits(CaDiCal_propagator& propagator, std::vect
         const auto* v = arg->get_lits(propagator, aux);
         argLits.push_back(v->get_lit());
     }
-#ifdef NDEBUG
-    var_id = propagator.new_observed_var();
-#else
-    var_id = propagator.new_observed_var(OPT("<" + to_string() + ">"));
-#endif
     for (int arg: argLits) {
         aux.emplace_back(std::vector<int>({-var_id, arg}));
     }
@@ -356,8 +390,16 @@ const literal_term* and_term::get_lits(CaDiCal_propagator& propagator, std::vect
 }
 
 const literal_term* or_term::get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) {
-    if (var_id != 0)
+    if (var_id == 0)
+        var_id = propagator.new_observed_var(OPT("<" + to_string() + ">"));
+    else if (active)
         return manager.mk_lit(var_id);
+    else
+        propagator.observe_again(var_id);
+#ifdef PUSH_POP
+    active = true;
+    propagator.add_undo([this, &propagator]() { propagator.observe_remove(var_id);  active = false; });
+#endif
     assert(args.size() > 1);
     std::vector<int> argLits;
     argLits.reserve(args.size());
@@ -365,11 +407,6 @@ const literal_term* or_term::get_lits(CaDiCal_propagator& propagator, std::vecto
         const auto* v = arg->get_lits(propagator, aux);
         argLits.push_back(v->get_lit());
     }
-#ifdef NDEBUG
-    var_id = propagator.new_observed_var();
-#else
-    var_id = propagator.new_observed_var(OPT("<" + to_string() + ">"));
-#endif
     if (!positive) {
         for (int arg: argLits) {
             aux.emplace_back(std::vector<int>({-arg, (signed) var_id}));
@@ -391,16 +428,6 @@ true_term* formula_manager::mk_true() const {
 
 false_term* formula_manager::mk_false() const {
     return falseTerm;
-}
-
-template<typename T>
-inline void setX(unsigned idx, std::vector<T>& vec, T v) {
-    if (vec.size() <= idx) {
-        if (vec.capacity() <= idx)
-            vec.reserve(2 * idx + 1);
-        vec.resize(idx + 1);
-    }
-    vec[idx] = v;
 }
 
 template<typename T>
@@ -476,12 +503,17 @@ formula_term* formula_manager::mk_or(std::vector<formula_term*> c, bool positive
     if (j == 1)
         return c[0];
     c.resize(j);
-    auto it = or_cache.find(c);
-    if (it != or_cache.end()) {
-        assert(it->second->is_positive() == positive);
-        return it->second;
+    or_term* ret = nullptr;
+    if (tryGetValue(or_cache, c, ret)) {
+        assert(ret->is_positive() == positive);
+        return ret;
     }
-    auto* ret = new or_term(*this, c, positive);
+    ret = new or_term(*this, c, positive);
+#ifndef NDEBUG
+    for (const auto& n : names) {
+        assert(n.second != ret->to_string());
+    }
+#endif
     or_cache.insert(std::make_pair(c, ret));
     return ret;
 }
@@ -510,12 +542,17 @@ formula_term* formula_manager::mk_and(std::vector<formula_term*> c, bool positiv
     if (j == 1)
         return c[0];
     c.resize(j);
-    auto it = and_cache.find(c);
-    if (it != and_cache.end()) {
-        assert(it->second->is_positive() == positive);
-        return it->second;
+    and_term* ret = nullptr;
+    if (tryGetValue(and_cache, c, ret)) {
+        assert(ret->is_positive() == positive);
+        return ret;
     }
-    auto* ret = new and_term(*this, c, positive);
+    ret = new and_term(*this, c, positive);
+#ifndef NDEBUG
+    for (const auto& n : names) {
+        assert(n.second != ret->to_string());
+    }
+#endif
     and_cache.insert(std::make_pair(c, ret));
     return ret;
 }

@@ -1,6 +1,6 @@
 ﻿#include "matrix_propagator.h"
 
-matrix_propagator::matrix_propagator(cnf<indexed_clause*>& cnf, ComplexADTSolver& adtSolver, ProgParams& progParams, unsigned literalCnt) :
+matrix_propagator::matrix_propagator(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt) :
         propagator_base(cnf, adtSolver, progParams, literalCnt), lvl(progParams.Depth) {
 
     assert(progParams.Mode == Rectangle || progParams.Mode == Core);
@@ -33,7 +33,7 @@ void matrix_propagator::create_instances() {
         assert(progParams.multiplicity[i] <= 1 || !matrix[i]->Ground);
         if (progParams.multiplicity[i] == 0)
             continue;
-        GetGround(matrix[i], progParams.multiplicity[i] - 1);
+        get_ground(matrix[i], progParams.multiplicity[i] - 1);
     }
 }
 
@@ -136,7 +136,7 @@ bool matrix_propagator::next_level_core() {
     return false;
 }
 
-clause_instance* matrix_propagator::get_clause_instance(const indexed_clause* clause, unsigned cpyIdx, literal selector) {
+clause_instance* matrix_propagator::create_clause_instance(const indexed_clause* clause, unsigned cpyIdx, literal selector) {
     vector<ground_literal> instances;
     instances.reserve(clause->literals.size());
     for (auto* lit : clause->literals) {
@@ -146,14 +146,14 @@ clause_instance* matrix_propagator::get_clause_instance(const indexed_clause* cl
 }
 
 bool matrix_propagator::are_connected(const ground_literal& l1, const ground_literal& l2) {
-    if (l1.Literal->polarity == l2.Literal->polarity || l1.GetArity() != l2.GetArity())
+    if (l1.lit->polarity == l2.lit->polarity || l1.arity() != l2.arity())
         return false;
-    const auto* unification = UnificationHints.get(l1.Literal->Index, l2.Literal->Index);
+    const auto* unification = unificationHints.get(l1.lit->Index, l2.lit->Index);
     assert(unification != nullptr);
     if (large_array::is_invalid(unification))
         return false;
-    bool res = unification->IsSatisfied(l1, l2);
-    assert(res == UnificationHints.get(l2.Literal->Index, l1.Literal->Index)->IsSatisfied(l2, l1));
+    bool res = unification->IsSatisfied(*this, l1, l2);
+    assert(res == unificationHints.get(l2.lit->Index, l1.lit->Index)->IsSatisfied(*this, l2, l1));
     return res;
 }
 
@@ -188,27 +188,37 @@ void matrix_propagator::check_proof(const vector<clause_instance*>& chosen) {
 #endif
 }
 
-clause_instance* matrix_propagator::GetGround(const indexed_clause* clause, unsigned cpy) {
+clause_instance* matrix_propagator::get_ground(const indexed_clause* clause, unsigned cpy) {
+    if (clause == nullptr)
+        return nullptr;
     auto& instances = cachedClauses[clause->Index];
     for (unsigned i = instances.size(); i <= cpy; i++) {
         literal selector = m.mk_lit(new_observed_var(OPT("select#" + to_string(clause->Index) + "@" + to_string(i))));
-        auto* info = get_clause_instance(clause, i, selector);
+        auto* info = create_clause_instance(clause, i, selector);
         instances.push_back(info);
         allClauses.push_back(info);
         assert(!contains_key(exprToInfo, selector));
         exprToInfo.insert(make_pair(selector, info));
     }
-
     return instances[cpy];
 }
 
 void matrix_propagator::assert_root() {
     assert(std::any_of(matrix.clauses.begin(), matrix.clauses.end(), [](const indexed_clause* c) { return c->Conjecture; }));
     for (unsigned i = 0; i < matrix.size(); i++) {
-        if (matrix[i]->Conjecture)
-            solver->add(GetGround(matrix[i], 0)->selector->get_lit());
+        if (matrix[i]->Conjecture) {
+            int lit = get_ground(matrix[i], 0)->selector->get_lit();
+            solver->add(lit);
+#ifdef DIMACS
+            dimacs << lit << " ";
+#endif
+        }
     }
     solver->add(0);
+
+#ifdef DIMACS
+    dimacs << "0\n";
+#endif
 }
 
 vector<literal> just;
@@ -264,82 +274,124 @@ void matrix_propagator::pb_clause_limit() {
     }
 }
 
-void matrix_propagator::fixed2(literal_term* e, bool value) {
-
-    clause_instance* info = nullptr;
-    if (!tryGetValue(exprToInfo, e, info)) {
-        int lim = 0;
-        if (value)
+void matrix_propagator::fixed(literal_term* e, bool value) {
+    if (is_conflict_flag)
+        return;
+    try {
+        if (term_solver.asserted(e, value))
             return;
-        if (!hasLimFalse && tryGetValue(clauseLimitMap, e, lim)) {
-            hasLimFalse = true;
-            add_undo([this](){ hasLimFalse = false; });
-        }
-        return;
-    }
 
-    if (!value) {
-        info->value = unsat;
-        not_chosen.push_back(info);
-        add_undo([&]() { not_chosen.back()->value = undef; not_chosen.pop_back(); });
-        pb_clause_limit();
-        return;
-    }
-    //TODO: Core pb
-
-    unsigned c = info->clause->Index;
-
-    /*for (unsigned i = info->copy_idx; i > 0; i--) {
-        if (cachedClauses[c][i - 1]->value == sat)
-            break; // If some smaller element is already assigned true, it has propagated the remaining ones already - no reason to continue
-        propagate({ e }, GetGround(info->clause, i - 1)->selector);
-    }*/
-
-    if (info->copy_idx > 0) {
-        auto val = cachedClauses[c][info->copy_idx - 1]->value;
-        if (val != sat) {
-            if (!soft_propagate({e}, GetGround(info->clause, info->copy_idx - 1)->selector))
+        clause_instance* info = nullptr;
+        if (!tryGetValue(exprToInfo, e, info)) {
+            int lim = 0;
+            if (value)
                 return;
+            if (!hasLimFalse && tryGetValue(clauseLimitMap, e, lim)) {
+                hasLimFalse = true;
+                add_undo([this]() { hasLimFalse = false; });
+            }
+            return;
         }
-    }
 
-    info->value = sat;
-    chosen.push_back(info);
-    add_undo([&]() { chosen.back()->value = undef; chosen.pop_back(); });
+        if (!value) {
+            info->value = unsat;
+            not_chosen.push_back(info);
+            add_undo([&]() {
+                not_chosen.back()->value = undef;
+                not_chosen.pop_back();
+            });
+            pb_clause_limit();
+            return;
+        }
 
-#ifndef PUSH_POP
-    if (!info->propagated) {
-#endif
-        // Tautology elimination
-        for (int k = 0; k < info->literals.size(); k++) {
-            for (int l = k + 1; l < info->literals.size(); l++) {
-                if (info->literals[k].Literal->polarity != info->literals[l].Literal->polarity &&
-                    info->literals[k].Literal->nameID == info->literals[l].Literal->nameID) {
+        unsigned c = info->clause->Index;
 
-                    // TODO: Store tautology constraints
-                    auto* diseq = CollectConstrainUnifiable(info->literals[k], *(info->literals[l].Literal));
-                    if (diseq == nullptr)
-                        continue;
-                    // Clause contains two complementary literals
-                    // Why did the simplifier not remove those?!
-                    assert(!diseq->tautology());
-                    // clause->TautologyConstraints->emplace_back(k, l, diseq);
+        /*for (unsigned i = info->copy_idx; i > 0; i--) {
+            if (cachedClauses[c][i - 1]->value == sat)
+                break; // If some smaller element is already assigned true, it has propagated the remaining ones already - no reason to continue
+            propagate({ e }, GetGround(info->clause, i - 1)->selector);
+        }*/
 
-                    formula neq = diseq->GetNegConstraints(*this, info->literals[k], info->literals[l]);
-                    hard_propagate({ e }, neq);
-                    delete diseq;
-                }
+        if (info->copy_idx > 0) {
+            auto val = cachedClauses[c][info->copy_idx - 1]->value;
+            if (val != sat) {
+                if (!soft_propagate({e}, get_ground(info->clause, info->copy_idx - 1)->selector))
+                    return;
             }
         }
 
-        if (!PropagateRules(e, info))
-            return;
+        info->value = sat;
+        chosen.push_back(info);
+        add_undo([&]() {
+            chosen.back()->value = undef;
+            chosen.pop_back();
+        });
+
+        // "Relevance propagation" of delayed equalities
+        for (const auto& eq : info->delayedRelevantTrue) {
+            try {
+                assert(eq.just.litJust.size() == 1 && eq.just.eqJust.empty());
+                LogN("Delayed: " << eq.to_string() << " := 1");
+                if (!term_solver.asserted(eq.just.litJust[0], eq.LHS, eq.RHS, true))
+                    return;
+            }
+            catch (...) {
+                cout << "Crashed unify" << endl;
+                exit(132);
+            }
+        }
+        for (const auto& eq : info->delayedRelevantFalse) {
+            try {
+                assert(eq.just.litJust.size() == 1 && eq.just.eqJust.empty());
+                LogN("Delayed: " << eq.to_string() << " := 0");
+                if (!term_solver.asserted(eq.just.litJust[0], eq.LHS, eq.RHS, false))
+                    return;
+            }
+            catch (...) {
+                cout << "Crashed unify" << endl;
+                exit(132);
+            }
+        }
+
 #ifndef PUSH_POP
-        info->propagated = true;
-    }
+        if (!info->propagated) {
+#endif
+            // Tautology elimination
+            for (int k = 0; k < info->literals.size(); k++) {
+                for (int l = k + 1; l < info->literals.size(); l++) {
+                    if (info->literals[k].lit->polarity != info->literals[l].lit->polarity &&
+                        info->literals[k].lit->nameID == info->literals[l].lit->nameID) {
+
+                        // TODO: Store tautology constraints
+                        auto* diseq = CollectConstrainUnifiable(info->literals[k], *(info->literals[l].lit));
+                        if (diseq == nullptr)
+                            continue;
+                        // Clause contains two complementary literals
+                        // Why did the simplifier not remove those?!
+                        assert(!diseq->tautology());
+                        // clause->TautologyConstraints->emplace_back(k, l, diseq);
+
+                        formula neq = diseq->GetNegConstraints(*this, info->literals[k], info->literals[l]);
+                        hard_propagate({e}, neq);
+                        delete diseq;
+                    }
+                }
+            }
+
+            if (!propagate_rules(e, info))
+                return;
+#ifndef PUSH_POP
+            info->propagated = true;
+        }
 #endif
 
-    pb_clause_limit();
+        pb_clause_limit();
+    }
+    catch (...) {
+        cout << "Crashed" << endl;
+        __builtin_trap();
+        exit(131);
+    }
 }
 
 formula_term* matrix_propagator::connect_literal(clause_instance* info, const ground_literal& lit) {
@@ -352,13 +404,13 @@ formula_term* matrix_propagator::connect_literal(clause_instance* info, const gr
         unsigned literalCnt = cachedClause[0]->literals.size();
         for (int j = 0; j < literalCnt; j++) {
             // TODO: Only iterate over the relevant ones
-            CacheUnification(lit, cachedClause[0]->literals[j]);
-            const subterm_hint* unification = UnificationHints.get(
-                    lit.Literal->Index,
-                    cachedClause[0]->literals[j].Literal->Index);
+            cache_unification(lit, cachedClause[0]->literals[j]);
+            const subterm_hint* unification = unificationHints.get(
+                    lit.lit->Index,
+                    cachedClause[0]->literals[j].lit->Index);
 
             if (large_array::is_invalid(unification) ||
-                lit.Literal->polarity == cachedClause[0]->literals[j].Literal->polarity)
+                lit.lit->polarity == cachedClause[0]->literals[j].lit->polarity)
                 continue;
 
             for (int k = 0; k < cachedClause.size(); k++) {
@@ -375,9 +427,9 @@ formula_term* matrix_propagator::connect_literal(clause_instance* info, const gr
     if (progParams.Mode == Core) {
         for (int i = 0; i < matrix.size(); i++) {
             for (int j = 0; j < matrix[i]->size(); j++) {
-                CacheUnification(lit, *matrix[i]->literals[j]);
-                const subterm_hint* unification = UnificationHints.get(lit.Literal->Index, matrix[i]->literals[j]->Index);
-                if (large_array::is_invalid(unification) || lit.Literal->polarity == matrix[i]->literals[j]->polarity)
+                cache_unification(lit, *matrix[i]->literals[j]);
+                const subterm_hint* unification = unificationHints.get(lit.lit->Index, matrix[i]->literals[j]->Index);
+                if (large_array::is_invalid(unification) || lit.lit->polarity == matrix[i]->literals[j]->polarity)
                     continue;
                 if (!cachedClauses[i].empty() && matrix[i]->Ground) {
                     assert(cachedClauses[i].size() == 1);
@@ -410,12 +462,12 @@ void matrix_propagator::final() {
     assert(!chosen.empty());
     vector<vector<path_element>> paths;
     LogN("Final (" << ++finalCnt << ")");
-    pvector<clause_instance> shuffledChosen(chosen);
+    vector<clause_instance*> shuffledChosen(chosen);
     Shuffle(shuffledChosen);
     const int limit = 1;
 
     vector<path_element> current_path;
-    FindPath(0, shuffledChosen, current_path, paths, limit);
+    find_path(0, shuffledChosen, current_path, paths, limit);
     if (paths.empty())
         return;
 #ifdef DEBUG
@@ -434,9 +486,9 @@ void matrix_propagator::final() {
             for (int j = i + 1; j < path.size(); j++) {
                 assert(!are_connected(path[i].lit, path[j].lit));
                 vector<formula> unificationConstraint;
-                const auto* unification = UnificationHints.get(path[i].lit.Literal->Index, path[j].lit.Literal->Index);
+                const auto* unification = unificationHints.get(path[i].lit.lit->Index, path[j].lit.lit->Index);
                 assert(unification != nullptr);
-                if (!large_array::is_invalid(unification) && path[i].lit.Literal->polarity != path[j].lit.Literal->polarity) {
+                if (!large_array::is_invalid(unification) && path[i].lit.lit->polarity != path[j].lit.lit->polarity) {
                     unification->GetPosConstraints(*this, path[i].lit, path[j].lit, unificationConstraint);
                     if (!unificationConstraint.empty())
                         constraints.push_back(m.mk_and(unificationConstraint));
@@ -450,13 +502,13 @@ void matrix_propagator::final() {
                     indexed_clause* cl = matrix[i];
                     unsigned literalCnt =cl ->literals.size();
                     for (int j = 0; j < literalCnt; j++) {
-                        CacheUnification(elem.lit, *(cl->literals[j]));
-                        const subterm_hint* unification = UnificationHints.get(
-                                elem.lit.Literal->Index,
+                        cache_unification(elem.lit, *(cl->literals[j]));
+                        const subterm_hint* unification = unificationHints.get(
+                                elem.lit.lit->Index,
                                 cl->literals[j]->Index);
 
                         if (large_array::is_invalid(unification) ||
-                            elem.lit.Literal->polarity == cl->literals[j]->polarity)
+                            elem.lit.lit->polarity == cl->literals[j]->polarity)
                             continue;
 
                         unsigned maxId = 0;
@@ -485,8 +537,8 @@ void matrix_propagator::final() {
     }
 }
 
-void matrix_propagator::FindPath(int clauseIdx, const vector<clause_instance*>& clauses, vector<path_element>& path,
-                                 vector<vector<path_element>>& foundPaths, int limit) {
+void matrix_propagator::find_path(int clauseIdx, const vector<clause_instance*>& clauses, vector<path_element>& path,
+                                  vector<vector<path_element>>& foundPaths, int limit) {
     if (clauseIdx >= clauses.size()) {
         foundPaths.push_back(path);
 #ifndef NDEBUG
@@ -524,7 +576,7 @@ void matrix_propagator::FindPath(int clauseIdx, const vector<clause_instance*>& 
             continue;
 
         path.emplace_back(*info->clause, info->copy_idx, l1);
-        FindPath(clauseIdx + 1, clauses, path, foundPaths, limit);
+        find_path(clauseIdx + 1, clauses, path, foundPaths, limit);
         if (foundPaths.size() >= limit)
             return;
         path.pop_back();

@@ -4,15 +4,18 @@
 
 struct term;
 struct term_instance;
-struct SimpleADTSolver;
+struct simple_adt_solver;
 struct subterm_hint;
 struct propagator_base;
+struct matrix_propagator;
+struct indexed_clause;
+struct clause_instance;
 
 struct raw_term {
     int FuncID;
-    const pvector<term> Args;
+    const vector<term*> Args;
 
-    raw_term(int funcId, pvector<term> args) : FuncID(funcId), Args(std::move(args)) {
+    raw_term(int funcId, vector<term*> args) : FuncID(funcId), Args(std::move(args)) {
     }
 
     bool operator==(const raw_term& other) const {
@@ -64,25 +67,38 @@ class term : public raw_term {
 
     mutable vector<term_instance*> instances;
 
-public:
-    const unsigned HashID;
-    const bool Ground;
-    SimpleADTSolver& Solver;
+    const unsigned ast_id;
+    const indexed_clause* origin_clause; // Might point to uninitialized during input parsing
 
-    unsigned getSolverId() const;
+public:
+
+    simple_adt_solver& Solver;
+
+    unsigned solver_id() const;
+    const indexed_clause* clause() const {
+        return origin_clause;
+    }
 
     bool is_var() const { return FuncID < 0; }
     bool is_const() const { return FuncID >= 0; }
 
+    bool is_ground() const {
+        return origin_clause == nullptr;
+    }
+
+    unsigned id() const {
+        return ast_id;
+    }
+
     bool operator==(const term& other) const {
-        return getSolverId() == other.getSolverId() && HashID == other.HashID;
+        return solver_id() == other.solver_id() && ast_id == other.ast_id && origin_clause == other.origin_clause;
     }
 
     bool operator!=(const term& other) const {
         return !this->operator==(other);
     }
 
-    term(int funcId, pvector<term> args, SimpleADTSolver& solver, unsigned hashId);
+    term(int funcId, vector<term*> args, simple_adt_solver& solver, unsigned hashId, const indexed_clause* clause);
 
     term(const term&) = delete;
 
@@ -90,17 +106,17 @@ public:
 
     void reset();
 
-    term_instance* GetInstance(unsigned cpy) const;
+    term_instance* get_instance(unsigned cpy, matrix_propagator& propagator) const;
 
     bool SeemsPossiblyUnifiable(term* rhs, subterm_hint& hint);
 
     int compare_to(const term* other) const {
-        return this == other ? 0 : (HashID < other->HashID ? -1 : HashID > other->HashID ? 1 : 0);
+        return this == other ? 0 : (id() < other->id() ? -1 : id() > other->id() ? 1 : 0);
     }
 
     string to_string() const;
 
-    string PrettyPrint(unsigned cpyIdx, unordered_map<term_instance*, string>* prettyNames) const;
+    string pretty_print(unsigned cpyIdx, unordered_map<term_instance*, string>* prettyNames) const;
 };
 
 namespace std {
@@ -110,56 +126,63 @@ namespace std {
     };
 }
 
-struct Justification {
-    virtual void AddJustification(SimpleADTSolver* adtSolver, vector<literal>& just) = 0;
-    virtual bool is_tautology() const = 0;
-    virtual string to_string() const = 0;
-};
+struct justification {
 
-struct LiteralJustification : public Justification {
+    vector<literal> litJust;
+    vector<pair<term_instance*, term_instance*>> eqJust;
 
-    literal lit;
-
-    LiteralJustification(literal lit) : lit(lit) { }
-
-    void AddJustification(SimpleADTSolver* adtSolver, vector<literal>& just) override {
-        just.push_back(lit);
+    void add_literal(literal lit) {
+        litJust.push_back(lit);
     }
 
-    bool is_tautology() const override { return lit->is_true(); }
-
-    string to_string() const override {
-        return lit->to_string();
+    void add_literals(const std::vector<literal>& lit) {
+        add_range(litJust, lit);
     }
-};
 
-class EqualityJustification : public Justification {
-    term_instance* LHS;
-    term_instance* RHS;
+    void remove_literal() {
+        litJust.pop_back();
+    }
 
-public:
-    EqualityJustification(term_instance* lhs, term_instance* rhs) : LHS(lhs), RHS(rhs) { }
+    void add_equality(term_instance* lhs, term_instance* rhs) {
+        eqJust.emplace_back(lhs, rhs);
+    }
 
-    void AddJustification(SimpleADTSolver* adtSolver, vector<literal>& just) override;
+    void remove_equality() {
+        eqJust.pop_back();
+    }
 
-    bool is_tautology() const override { return LHS == RHS; }
-
-    string to_string() const override;
-};
-
-struct CheckPosition {
-    int ArgIdx;
-    term_instance* LHS;
-    term_instance* RHS;
-
-    CheckPosition(term_instance* lhs, term_instance* rhs) : LHS(lhs), RHS(rhs) {}
+    void add(const justification& other) {
+        add_range(litJust, other.litJust);
+        add_range(eqJust, other.eqJust);
+    }
 
     string to_string() const;
+
+    void resolve_justification(simple_adt_solver* adtSolver, vector<literal>& just,
+                               unordered_map<term_instance*, unsigned>& termInstance, vector<unsigned>& parent) const;
+
+    void resolve_justification(simple_adt_solver* adtSolver, vector<literal>& just) const;
+
+    bool empty() const {
+        return litJust.empty() && eqJust.empty();
+    }
+};
+
+struct position {
+    int argIdx;
+    term_instance* lhs;
+    term_instance* rhs;
+
+    position(term_instance* lhs, term_instance* rhs) : argIdx(0), lhs(lhs), rhs(rhs) {}
+
+#ifndef NDEBUG
+    string to_string() const;
+#endif
 };
 
 struct Lazy {
-    vector<Justification*> Justifications;
-    stack<CheckPosition> Prev;
+    justification just;
+    stack<position> prev;
     term_instance* LHS = nullptr;
     term_instance* RHS = nullptr;
     bool Solved = false;
@@ -168,23 +191,24 @@ struct Lazy {
     Lazy(term_instance* lhs, term_instance* rhs) : LHS(lhs), RHS(rhs) { }
 };
 
-class lessThan {
-public:
+struct less_than {
     term_instance* LHS = nullptr;
     term_instance* RHS = nullptr;
 
-    lessThan() = default;
-    lessThan(term_instance* lhs, term_instance* rhs);
+    less_than() = default;
+    less_than(term_instance* lhs, term_instance* rhs) : LHS(lhs), RHS(rhs) { }
 
-    bool operator==(const lessThan& other) const {
+    bool operator==(const less_than& other) const {
         return LHS == other.LHS && RHS == other.RHS;
     }
 
-    bool operator!=(const lessThan& other) const {
+    bool operator!=(const less_than& other) const {
         return !this->operator==(other);
     }
 
+#ifndef NDEBUG
     string to_string() const;
+#endif
 };
 
 class equality {
@@ -192,10 +216,11 @@ class equality {
 public:
     term_instance* LHS = nullptr;
     term_instance* RHS = nullptr;
-    vector<Justification*> just;
+    justification just;
 
     equality() = default;
-    equality(term_instance* lhs, term_instance* rhs, vector<Justification*> just);
+    equality(term_instance* lhs, term_instance* rhs, justification just);
+    equality(term_instance* lhs, term_instance* rhs) : equality(lhs, rhs, {}) { }
 
     term_instance* GetOther(term_instance* lhsOrRhs) {
         assert(LHS == lhsOrRhs || RHS == lhsOrRhs);
@@ -210,7 +235,9 @@ public:
         return !this->operator==(other);
     }
 
+#ifndef NDEBUG
     string to_string() const;
+#endif
 };
 
 namespace std {
@@ -219,15 +246,15 @@ namespace std {
         size_t operator()(const equality& x) const;
     };
     template <>
-    struct hash<lessThan> {
-        size_t operator()(const lessThan& x) const;
+    struct hash<less_than> {
+        size_t operator()(const less_than& x) const;
     };
 }
 
 struct term_instance {
     // ast
     const term* t;
-    const unsigned cpyIdx;
+    clause_instance* const origin;
 
     // enode
     term_instance* parent;
@@ -235,8 +262,8 @@ struct term_instance {
     unsigned cnt = 1;
 
     // PO node
-    vector<tuple<term_instance*, bool, vector<Justification*>>> greater;
-    vector<tuple<term_instance*, bool, vector<Justification*>>> smaller;
+    vector<tuple<term_instance*, bool, justification>> greater;
+    vector<tuple<term_instance*, bool, justification>> smaller;
 
     // watches
     vector<Lazy*> diseq_watches;
@@ -247,17 +274,21 @@ struct term_instance {
     }
 
 private:
-    term_instance(const term* term, unsigned cpyIdx) : t(term), cpyIdx(cpyIdx), parent(this) { }
+    term_instance(const term* term, clause_instance* origin) : t(term), origin(origin), parent(this) { }
 
 public:
-    static term_instance* NewInstance(const term* term, unsigned copy) {
-        return new term_instance(term, copy);
+    static term_instance* new_instance(const term* term, clause_instance* origin) {
+        return new term_instance(term, origin);
     }
 
-    term_instance* FindRootQuick(propagator_base& propagator);
+    unsigned cpyIdx() const;
+
+    term_instance* find_root(propagator_base& propagator);
 
     inline bool operator==(const term_instance& other) const {
-        return *t == *other.t && cpyIdx == other.cpyIdx;
+        bool ret = *t == *other.t && cpyIdx() == other.cpyIdx();
+        assert (!ret || origin == other.origin);
+        return ret;
     }
 
     inline bool operator!=(const term_instance& other) const {
@@ -268,15 +299,16 @@ public:
         if (this == other)
             return 0;
         int ret = t->compare_to(other->t);
-        return ret != 0 ? ret : (cpyIdx < other->cpyIdx ? -1 : cpyIdx > other->cpyIdx ? 1 : 0);
+        return ret != 0 ? ret : (cpyIdx() < other->cpyIdx() ? -1 : cpyIdx() > other->cpyIdx() ? 1 : 0);
     }
 
     string to_string() const {
-        if (t->Ground)
+        if (t->is_ground())
             return t->to_string();
-        return t->to_string() + "#" + std::to_string(cpyIdx);
+        return t->to_string() + "#" + std::to_string(cpyIdx());
     }
 };
+
 
 namespace std {
     template <>

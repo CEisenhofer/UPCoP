@@ -3,18 +3,18 @@
 #include <climits>
 #include <vector>
 
-enum InputFormat {
+enum InputFormat : unsigned char {
     TPTP,
     SMTLIB,
 };
 
 
-enum IncStrategy {
+enum IncStrategy : unsigned char {
     Core,
     Rectangle,
 };
 
-enum ConjStrategy {
+enum ConjStrategy : unsigned char {
     Auto,
     Keep,
     Pos,
@@ -28,12 +28,10 @@ struct ProgParams {
     unsigned Depth = 1;
     unsigned MaxDepth = UINT_MAX;
     bool ExternalIteration = true;
-    bool Test = false;
     bool Preprocess = true;
     bool CheckProof = false;
     ConjStrategy Conjectures = Keep;
-    // bool NewCore;
-    bool Z3Split = false;
+    bool SATSplit = false;
     InputFormat Format = TPTP;
 
     std::vector<unsigned> multiplicity;
@@ -51,4 +49,4 @@ struct ProgParams {
 #endif
 };
 
-void ParseParams(int argc, char* argv[], ProgParams& progParams);
+void parse_params(int argc, char* argv[], ProgParams& progParams);

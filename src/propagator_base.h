@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ADTSolver.h"
+#include "adt_solver.h"
 #include "CLIParser.h"
 #include "cnf.h"
 #include "ground_literal.h"
@@ -28,7 +28,7 @@ class large_array final {
     // This is fine, as the class is longer than one; the index is invalid for sure
 #define FAILED_PTR ((subterm_hint*)-1)
     unsigned size;
-    optional<pvector<const subterm_hint>> small;
+    optional<vector<const subterm_hint*>> small;
     optional<unordered_map<pair<unsigned, unsigned>, const subterm_hint*>> large;
 
 public:
@@ -58,14 +58,14 @@ public:
 
     subterm_hint(vector<pair<term*, term*>> equalities, bool swapped) : swapped(swapped), equalities(std::move(equalities)) { }
 
-    void GetPosConstraints(propagator_base& propagator, const ground_literal& l1, const ground_literal& l2, vector<formula>& constraints) const;
-    formula GetNegConstraints(propagator_base& propagator, const ground_literal& l1, const ground_literal& l2) const;
+    void GetPosConstraints(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2, vector<formula>& constraints) const;
+    formula GetNegConstraints(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2) const;
 
-    bool IsSatisfied(const ground_literal& l1, const ground_literal& l2) const;
+    bool IsSatisfied(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2) const;
 
     inline pair<int, int> GetCpyIdx(const ground_literal& l1, const ground_literal& l2) const {
         // return (l1.CopyIndex, l2.CopyIndex);
-        return !swapped ? make_pair(l1.CopyIndex, l2.CopyIndex) : make_pair(l2.CopyIndex, l1.CopyIndex);
+        return !swapped ? make_pair(l1.copyIdx, l2.copyIdx) : make_pair(l2.copyIdx, l1.copyIdx);
     }
 
     bool tautology() const {
@@ -81,6 +81,7 @@ public:
     }
 };
 
+// TODO: Merge with matrix propagator
 struct propagator_base : public CaDiCal_propagator {
 
     mutable std::default_random_engine generator;
@@ -92,7 +93,7 @@ protected:
     const cnf<indexed_clause*>& matrix;
 
 public:
-    ComplexADTSolver& term_solver;
+    complex_adt_solver& term_solver;
     bool Running = true;
 
     propagator_base(propagator_base&) = delete;
@@ -101,45 +102,33 @@ public:
     // [min, max)
     unsigned getRandom(unsigned min, unsigned max) const;
 
-    propagator_base(cnf<indexed_clause*>& cnf, ComplexADTSolver& adtSolver, ProgParams& progParams, unsigned literalCnt);
+    propagator_base(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt);
 
-public:
-
-    large_array UnificationHints;
-
-    inline void add_undo(const action& action) {
-        undo_stack.push_back(action);
-    }
+    large_array unificationHints;
 
 protected:
 
     // Return: null - infeasible to unify
     // Returns 0 length - always unifies
     // Returns n length - given n elements have (and could) unify
-    subterm_hint* CollectConstrainUnifiable(const ground_literal& l1, const indexed_literal& l2) const;
+    static subterm_hint* CollectConstrainUnifiable(const ground_literal& l1, const indexed_literal& l2) ;
 
 public:
 
-    void CacheUnification(const ground_literal& l1, const indexed_literal& l2);
+    void cache_unification(const ground_literal& l1, const indexed_literal& l2);
 
-    inline void CacheUnification(const ground_literal& l1, const ground_literal& l2) {
-        return CacheUnification(l1, *l2.Literal);
+    inline void cache_unification(const ground_literal& l1, const ground_literal& l2) {
+        return cache_unification(l1, *l2.lit);
     }
 
-private:
-
-    void fixed(literal var, bool value) override;
-
-    virtual void fixed2(literal lit, bool value) = 0;
-
 public:
 
-    static string ClauseToString(const vector<ground_literal>& ground, unordered_map<term_instance*, string>* prettyNames);
+    static string clause_to_string(const vector<ground_literal>& ground, unordered_map<term_instance*, string>* prettyNames);
 
-    static string PrettyPrintLiteral(const fo_literal* l, unsigned cpyIdx, unordered_map<term_instance*, string>* prettyNames);
+    static string pretty_print_literal(const fo_literal* l, unsigned cpyIdx, unordered_map<term_instance*, string>* prettyNames);
 
-    static string PrettyPrintLiteral(const ground_literal& l, unordered_map<term_instance*, string>* prettyNames) {
-        return PrettyPrintLiteral(l.Literal, l.CopyIndex, prettyNames);
+    static string pretty_print_literal(const ground_literal& l, unordered_map<term_instance*, string>* prettyNames) {
+        return pretty_print_literal(l.lit, l.copyIdx, prettyNames);
     }
 
 protected:

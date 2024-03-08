@@ -3,6 +3,8 @@
 #include "cadical.hpp"
 #include "utils.h"
 
+#include <iostream>
+
 #ifndef NDEBUG
 extern std::unordered_map<unsigned, std::string> names;
 inline void reset_names() {
@@ -118,11 +120,19 @@ public:
     void register_formula(formula_term* term);
 };
 
+#ifndef PUSH_POP
+constexpr bool active = true;
+#endif
+
 class formula_term {
 
     const unsigned ast_id;
 
 protected:
+
+#ifdef PUSH_POP
+    bool active = false;
+#endif
 
     formula_manager& manager;
     int var_id = 0;
@@ -161,19 +171,6 @@ public:
     // first:  1 -> inline the variable positively
     // first: -1 -> inline the variable negatively
     virtual const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) = 0;
-
-    static std::string string_join(const std::vector<formula_term*>& args, const std::string& sep) {
-        assert(!args.empty());
-        if (args.size() == 1)
-            return args[0]->to_string();
-        std::stringstream sb;
-        sb << "(" << args[0]->to_string();
-        for (unsigned i = 1; i < args.size(); i++) {
-            sb << sep << args[i]->to_string();
-        }
-        sb << ")";
-        return sb.str();
-    }
 };
 
 class literal_term : public formula_term {
@@ -265,6 +262,7 @@ public:
         return positive;
     }
 
+    // TODO: Check if positive really makes a difference
     explicit complex_term(formula_manager& m, std::vector<formula_term*> args, bool positive) :
                                                                 formula_term(m), args(std::move(args)), positive(positive) {
         assert(this->args.size() > 1);
@@ -316,6 +314,10 @@ class CaDiCal_propagator : public CaDiCaL::ExternalPropagator {
 protected:
     std::vector<action> undo_stack;
 
+#ifdef DIMACS
+    std::stringstream dimacs;
+#endif
+
 private:
     int var_cnt = 0;
     std::vector<unsigned> undo_stack_limit;
@@ -351,6 +353,11 @@ public:
     CaDiCaL::Solver* solver = nullptr;
     formula_manager m;
 
+    inline void add_undo(const action& action) {
+        assert(solver->state() == CaDiCaL::SOLVING);
+        undo_stack.push_back(action);
+    }
+
     tri_state check() {
         switch (solver->solve()) {
             case 10:
@@ -365,6 +372,19 @@ public:
     unsigned vars() {
         return (unsigned)solver->vars();
     }
+
+#ifdef DIMACS
+    string get_dimacs() {
+        string clauses = dimacs.str();
+        unsigned cnt = 0;
+        for (char c : clauses) {
+            cnt += (unsigned)(c == '\n');
+        }
+        string ret = "p cnf " + std::to_string(vars()) + " " + to_string(cnt - 1) + "\n";
+        ret += dimacs.str();
+        return ret;
+    }
+#endif
 
 #ifndef NDEBUG
     void output_literals(const std::vector<literal>& lit) const;
@@ -415,13 +435,13 @@ protected:
 public:
 #ifndef NDEBUG
 
-    int new_observed_var(const std::string& name) {
+    inline int new_observed_var(const std::string& name) {
         int id = new_observed_var_raw();
         names.insert(std::make_pair(id, name));
         return id;
     }
 
-    int new_var() {
+    inline int new_var() {
         return new_var_raw();
     }
 
@@ -434,6 +454,15 @@ public:
         return new_observed_var_raw();
     }
 #endif
+
+    inline void observe_again(int var_id) {
+        solver->add_observed_var(var_id);
+    }
+
+    inline void observe_remove(int var_id) {
+        // solver->remove_observed_var(var_id);
+        // solver->melt(var_id);
+    }
 
 protected:
 

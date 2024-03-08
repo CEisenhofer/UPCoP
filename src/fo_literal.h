@@ -8,18 +8,18 @@ struct fo_literal {
     string name;
     unsigned nameID;
     bool polarity;
-    pvector<term> arg_bases;
+    vector<term*> arg_bases;
     optional<z3::expr_vector> InitExprs = nullopt;
 
-    inline unsigned Arity() const { return arg_bases.size(); }
+    inline unsigned arity() const { return arg_bases.size(); }
 
-    fo_literal(string name, unsigned nameID, bool polarity, pvector<term> args) : name(std::move(name)), nameID(nameID), polarity(polarity), arg_bases(std::move(args)) { }
+    fo_literal(string name, unsigned nameID, bool polarity, vector<term*> args) : name(std::move(name)), nameID(nameID), polarity(polarity), arg_bases(std::move(args)) { }
 
     fo_literal() : name("StdConstructor"), nameID(UINT32_MAX), polarity(true), arg_bases() { }
 
     fo_literal(z3::expr e, unordered_map<string, unsigned>& nameCache);
 
-    inline bool CanResolve(const fo_literal& l) const {
+    inline bool can_resolve(const fo_literal& l) const {
         assert((name == l.name) == (nameID == l.nameID));
         return polarity != l.polarity && nameID == l.nameID;
     }
@@ -35,7 +35,7 @@ struct fo_literal {
         return !(*this == l);
     }
 
-    string ToString() const;
+    string to_string() const;
 };
 
 namespace std {
@@ -45,7 +45,7 @@ namespace std {
             size_t ret = (l.nameID * 97127) ^ (l.polarity ? 1 : 0);
             ret += 17;
             for (const auto& arg : l.arg_bases) {
-                ret = (ret * 21) ^ arg->HashID;
+                ret = (ret * 21) ^ arg->id();
             }
             return ret;
         }

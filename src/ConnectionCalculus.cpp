@@ -3,7 +3,7 @@
 #include "clause.h"
 #include "cnf.h"
 #include "utils.h"
-#include "ADTSolver.h"
+#include "adt_solver.h"
 #include "matrix_propagator.h"
 #include <fstream>
 #include <z3++.h>
@@ -16,21 +16,26 @@
 
 #endif
 
-term* variable_abstraction::Apply(const pvector<term>& args) const {
+term* variable_abstraction::apply(const vector<term*>& args) const {
     assert(args.empty());
-    term* t = solver->MakeVar(-id - 1);
-    return t;
+    return var;
 }
 
-term* term_abstraction::Apply(const pvector<term>& args) const {
-    term* t = solver->MakeTerm(termId, args);
+term* term_abstraction::apply(const vector<term*>& args) const {
+    const indexed_clause* cl = nullptr;
+    for (auto* arg : args) {
+        assert(cl == nullptr || cl == arg->clause());
+        if (arg->clause() != nullptr)
+            cl = arg->clause();
+    }
+    auto* t = solver->make_term(termId, args, cl);
     return t;
 }
 
 int main(int argc, char* argv[]) {
 
     ProgParams progParams;
-    ParseParams(argc, argv, progParams);
+    parse_params(argc, argv, progParams);
     /*if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) {
         Console.BufferHeight = 20000;
     }*/
@@ -174,7 +179,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
     }
     if (assertions.empty())
         return sat;
-    ComplexADTSolver adtSolver;
+    complex_adt_solver adtSolver;
     unsigned literalCnt = 0;
     cnf<indexed_clause*> cnf = to_cnf(mk_and(assertions), adtSolver, literalCnt);
 
@@ -189,7 +194,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         auto* clause = cnf[i];
         bool allPos = true;
         bool allNeg = true;
-        conjectureCnt += (unsigned)clause->Conjecture;
+        conjectureCnt += (unsigned) clause->Conjecture;
         for (const auto& lit: clause->literals) {
             if (allPos && !lit->polarity)
                 allPos = false;
@@ -216,7 +221,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
     if (progParams.Conjectures == Auto)
         progParams.Conjectures =
                 conjectureCnt > 1 &&
-                (unsigned) log2((double)conjectureCnt) > smallestClauseSet.size() ? Min : Keep;
+                (unsigned) log2((double) conjectureCnt) > smallestClauseSet.size() ? Min : Keep;
     if (conjectureCnt == 0 && progParams.Conjectures == Keep)
         progParams.Conjectures = Min;
 
@@ -238,7 +243,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         for (unsigned i = 0; i < cnf.size(); i++) {
             cnf[i]->Conjecture = false;
         }
-        for (auto* c : new_conj) {
+        for (auto* c: new_conj) {
             c->Conjecture = true;
         }
     }
@@ -249,7 +254,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         cout << "Input file: " + path << "\n";
         cout << cnf.size() << " Clauses:\n";
         for (unsigned i = 0; i < cnf.size(); i++) {
-            cout << "\tClause #" << i << ": " << cnf[i]->ToString() << (cnf[i]->Conjecture ? "*" : "") << "\n";
+            cout << "\tClause #" << i << ": " << cnf[i]->to_string() << (cnf[i]->Conjecture ? "*" : "") << "\n";
         }
         std::flush(cout);
     }
@@ -285,10 +290,18 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         }
         propagator->Running = false;
 
+#ifdef DIMACS
+        string dimacs = propagator->get_dimacs();
+        ofstream out("output.dimacs");
+        out << dimacs;
+        out.close();
+        std::cout << "Wrote dimacs output to output.dimacs" << std::endl;
+#endif
+
         if (res != sat) {
             if (!silent)
                 cout << "Failed with depth " << id << endl;
-            timeLeft -= (int)stop_watch();
+            timeLeft -= (int) stop_watch();
             if (timeLeft <= 0) {
                 if (!silent)
                     cout << "Timeout" << endl;
@@ -327,27 +340,27 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         }
 
         z3::solver subsolver(context);
-        propagator->PrintProof(subsolver, prettyNames, usedClauses);
+        propagator->print_proof(subsolver, prettyNames, usedClauses);
 
         auto sortedPrettyNames =
                 to_sorted_vector(prettyNames,
-                    [](const pair<term_instance*, string>& a, const pair<term_instance*, string>& b) {
-                        if (a.first->t->FuncID > b.first->t->FuncID)
-                            return false;
-                        if (a.first->t->FuncID < b.first->t->FuncID)
-                            return true;
-                        if (a.first->cpyIdx > b.first->cpyIdx)
-                            return false;
-                        if (a.first->cpyIdx < b.first->cpyIdx)
-                            return true;
-                        return a.first->t->getSolverId() > b.first->t->getSolverId();
-                });
+                                 [](const pair<term_instance*, string>& a, const pair<term_instance*, string>& b) {
+                                     if (a.first->t->FuncID > b.first->t->FuncID)
+                                         return false;
+                                     if (a.first->t->FuncID < b.first->t->FuncID)
+                                         return true;
+                                     if (a.first->cpyIdx() > b.first->cpyIdx())
+                                         return false;
+                                     if (a.first->cpyIdx() < b.first->cpyIdx())
+                                         return true;
+                                     return a.first->t->solver_id() > b.first->t->solver_id();
+                                 });
 
         for (auto& s: sortedPrettyNames) {
-            auto* interpretation = s.first->FindRootQuick(*propagator);
+            auto* interpretation = s.first->find_root(*propagator);
             if (interpretation != s.first)
                 cout << "Substitution: " << s.second << " -> "
-                     << interpretation->t->PrettyPrint(interpretation->cpyIdx, &prettyNames) << '\n';
+                     << interpretation->t->pretty_print(interpretation->cpyIdx(), &prettyNames) << '\n';
         }
 
         cout << "Usage statistics:" << std::endl;
@@ -392,7 +405,7 @@ namespace std {
     };
 }
 
-cnf<indexed_clause*> to_cnf(const z3::expr& input, ComplexADTSolver& adtSolver, unsigned& literalCnt) {
+cnf<indexed_clause*> to_cnf(const z3::expr& input, complex_adt_solver& adtSolver, unsigned& literalCnt) {
     z3::context& ctx = input.ctx();
     unordered_set<optional<z3::func_decl>> terms;
     z3::expr_vector scopeVariables(ctx);
@@ -406,48 +419,49 @@ cnf<indexed_clause*> to_cnf(const z3::expr& input, ComplexADTSolver& adtSolver, 
 
     bool finite = true;
     for (const auto& f: terms) {
-        adtSolver.PeekTerm(f->range().name().str(), f->name().str(), (int) f->arity());
+        adtSolver.peek_term(f->range().name().str(), f->name().str(), (int) f->arity());
         finite &= f->arity() == 0;
     }
 
     for (unsigned i = 0; i < cnf.size(); i++) {
         for (const auto& variable: cnf[i].containedVars) {
-            adtSolver.GetSolver(variable->get_sort().name().str()); // Include data types that occur without any constants/functions
+            adtSolver.get_solver(variable->get_sort().name().str()); // Include data types that occur without any constants/functions
         }
     }
 
     for (const auto& f: terms) {
-        SimpleADTSolver& solver = *adtSolver.GetSolver(f->range().name().str());
+        simple_adt_solver& solver = *adtSolver.get_solver(f->range().name().str());
         // We have to postpone this after the MkDatatypeSort
-        termAbstraction.try_emplace(*f, &solver, solver.GetId(f->name().str()));
+        termAbstraction.try_emplace(*f, &solver, solver.get_id(f->name().str()));
     }
 
-    pvector<indexed_clause> newClauses;
+    vector<indexed_clause*> newClauses;
 
     unordered_map<fo_literal, indexed_literal*> literalToIndexed;
-    unordered_set<pvector<indexed_literal>> clauses;
 
     unsigned clauseIdx = 0;
 
     for (unsigned i = 0; i < cnf.size(); i++) {
+        // Uninitialized, but we need the memory address before calling the constructor
+        auto* nextPtr = (indexed_clause*)malloc(sizeof(indexed_clause));
         const auto& entry = cnf[i];
-        pvector<indexed_literal> literals;
+        vector<indexed_literal*> literals;
         z3::expr_vector from(ctx);
         for (const auto& var: entry.containedVars) {
             from.push_back(*var);
         }
         literals.reserve(entry.size());
         unordered_map<z3::func_decl, variable_abstraction> variableAbstraction;
-        for (int j = 0; j < entry.containedVars.size(); j++) {
+        for (unsigned j = 0; j < entry.containedVars.size(); j++) {
             z3::func_decl arg = from[j].decl();
-            auto& solver = *adtSolver.GetSolver(arg.range().name().str());
+            auto& solver = *adtSolver.get_solver(arg.range().name().str());
             variableAbstraction.try_emplace(
                     arg,
                     &solver,
-                    solver.MakeVar(arg.name().str()));
+                    solver.make_var(arg.name().str(), nextPtr));
         }
         for (const auto& lit: entry.literals) {
-            pvector<term> args;
+            vector<term*> args;
             args.reserve(lit.arg_bases.size());
             for (const auto& arg: lit.InitExprs.value()) {
                 args.push_back(SubstituteTerm(arg, termAbstraction, variableAbstraction));
@@ -462,12 +476,7 @@ cnf<indexed_clause*> to_cnf(const z3::expr& input, ComplexADTSolver& adtSolver, 
         }
 
         sort(literals.begin(), literals.end(), [](auto o1, auto o2) { return o1->Index < o2->Index; });
-        // TODO: Check subset
-        if (!clauses.insert(literals).second) {
-            // Eliminate duplicate clauses
-            continue;
-        }
-        auto* cl = new indexed_clause(clauseIdx++, literals);
+        auto* cl = new(nextPtr) indexed_clause(clauseIdx++, literals);
         cl->Conjecture = entry.Conjecture;
         newClauses.push_back(cl);
     }
@@ -640,6 +649,6 @@ term* SubstituteTerm(const z3::expr& expr,
     z3::func_decl decl = expr.decl();
     term_abstraction abstraction;
     return tryGetValue(termAbstraction, decl, abstraction)
-        ? abstraction.Apply(args)
-        : varAbstraction.at(decl).Apply(args);
+        ? abstraction.apply(args)
+        : varAbstraction.at(decl).apply(args);
 }

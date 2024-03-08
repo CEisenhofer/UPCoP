@@ -1,33 +1,32 @@
 #include "CLIParser.h"
 #include "cnf.h"
-#include "ADTSolver.h"
-#include "CadicalWrapper.h"
+#include "adt_solver.h"
 
 class Abstraction {
 protected:
-    SimpleADTSolver* solver;
+    simple_adt_solver* solver;
 
     Abstraction() = default;
 
-    Abstraction(SimpleADTSolver* solver) : solver(solver) {}
+    Abstraction(simple_adt_solver* solver) : solver(solver) {}
 
 public:
-    virtual term* Apply(const pvector<term>& args) const = 0;
+    virtual term* apply(const vector<term*>& args) const = 0;
 };
 
 class variable_abstraction : public Abstraction {
 
-    int id;
+    term* var;
 
 public:
 
     variable_abstraction() = default;
 
-    variable_abstraction(SimpleADTSolver* solver, term* variable) : Abstraction(solver), id(variable->FuncID) {
-        assert(variable->FuncID < 0);
+    variable_abstraction(simple_adt_solver* solver, term* var) : Abstraction(solver), var(var) {
+        assert(var->FuncID < 0);
     }
 
-    term* Apply(const pvector<term>& args) const override;
+    term* apply(const vector<term*>& args) const override;
 };
 
 class term_abstraction : public Abstraction {
@@ -38,14 +37,14 @@ public:
 
     term_abstraction() = default;
 
-    term_abstraction(SimpleADTSolver* solver, int termId) : Abstraction(solver), termId(termId) {}
+    term_abstraction(simple_adt_solver* solver, int termId) : Abstraction(solver), termId(termId) {}
 
-    term* Apply(const pvector<term>& args) const override;
+    term* apply(const vector<term*>& args) const override;
 };
 
 tri_state solve(const string& path, ProgParams& progParams, bool silent);
 
-static cnf<indexed_clause*> to_cnf(const z3::expr& input, ComplexADTSolver& adtSolver, unsigned& literalCnt);
+static cnf<indexed_clause*> to_cnf(const z3::expr& input, complex_adt_solver& adtSolver, unsigned& literalCnt);
 
 cnf<clause> to_cnf(z3::context& ctx, const z3::expr& input, bool polarity, z3::expr_vector& scopeVars, z3::sort_vector& scopeSorts,
                    z3::expr_vector& substitutions, unordered_set<optional<z3::func_decl>>& terms, unordered_map<string, unsigned>& nameCache, unordered_set<unsigned>& visited);
