@@ -262,6 +262,10 @@ public:
         return positive;
     }
 
+    const std::vector<formula_term*>& get_args() const {
+        return args;
+    }
+
     // TODO: Check if positive really makes a difference
     explicit complex_term(formula_manager& m, std::vector<formula_term*> args, bool positive) :
                                                                 formula_term(m), args(std::move(args)), positive(positive) {

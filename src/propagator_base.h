@@ -102,6 +102,10 @@ public:
     // [min, max)
     unsigned getRandom(unsigned min, unsigned max) const;
 
+    inline bool is_adt_split() const {
+        return progParams.SATSplit;
+    }
+
     propagator_base(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt);
 
     large_array unificationHints;

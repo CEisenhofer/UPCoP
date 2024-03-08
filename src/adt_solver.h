@@ -86,6 +86,7 @@ class simple_adt_solver {
 
     void conflict(const justification& just);
     void propagate(const justification& just, formula prop);
+    bool soft_propagate(const justification& just, literal prop);
 
 public:
 
@@ -125,11 +126,14 @@ private:
     bool update_ineq(term_instance* newRoot);
 
 public:
+    bool unify_split(literal just, term_instance* lhs, term_instance* rhs);
+    bool unify_split(term_instance* lhs, term_instance* rhs, justification& just);
+    bool non_unify_split(literal just, term_instance* lhs, term_instance* rhs);
     bool unify(literal just, term_instance* lhs, term_instance* rhs);
+    bool are_equal(term_instance* lhs, term_instance* rhs);
     bool non_unify(literal just, term_instance* lhs, term_instance* rhs);
     bool less(literal just, term_instance* lhs, term_instance* rhs, bool eq);
 
-    bool are_equal(term_instance* lhs, term_instance* rhs);
 
 private:
 
@@ -143,7 +147,7 @@ private:
 
 
     bool add_root(term_instance* b, term_instance* newRoot, bool incIneq = true);
-    bool merge_root(term_instance* r1, term_instance* r2, equality& eq, bool incIneq = true);
+    bool merge_root(term_instance* r1, term_instance* r2, const equality& eq, bool incIneq = true);
 
 public:
     static void find_just(term_instance* n1, term_instance* n2, justification& minimalJust);

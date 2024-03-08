@@ -147,6 +147,8 @@ std::vector<literal> j;
 bool CaDiCal_propagator::soft_propagate(const std::vector<literal>& just, literal prop) {
     if (is_conflict_flag)
         return false;
+    if (prop->is_true())
+        return true;
     if (!soft_justifications[literal_to_idx(prop->get_lit())].empty())
         // Already propagated
         return true;

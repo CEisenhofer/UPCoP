@@ -266,6 +266,8 @@ struct term_instance {
     vector<tuple<term_instance*, bool, justification>> smaller;
 
     // watches
+    vector<equality> eq_watches;
+    unsigned eq_watches_idx = 0;
     vector<Lazy*> diseq_watches;
     vector<tuple<term_instance*, term_instance*, bool, literal>> smaller_watches;
 
