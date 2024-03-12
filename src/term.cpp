@@ -16,7 +16,7 @@ size_t hash<term>::operator()(const term& x) const {
 
 size_t std::hash<term_instance>::operator()(const term_instance& x) const {
     static const hash<term> hash;
-    return hash(*x.t) * 133 + x.cpyIdx();
+    return hash(*x.t) * 133 + x.cpy_idx();
 }
 
 void justification::resolve_justification(simple_adt_solver* adtSolver, vector<literal>& just,
@@ -123,8 +123,8 @@ size_t hash<less_than>::operator()(const less_than& x) const {
     return h;
 }
 
-unsigned term_instance::cpyIdx() const {
-    return origin == nullptr ? 0 : origin->copy_idx;
+unsigned term_instance::cpy_idx() const {
+    return origin == nullptr ? 0 : origin->copyIdx;
 }
 
 term_instance* term_instance::find_root(propagator_base& propagator) {
@@ -139,6 +139,22 @@ term_instance* term_instance::find_root(propagator_base& propagator) {
     propagator.add_undo([this, prev]() { parent = prev; });
     parent = current;
     return current;
+}
+
+z3::expr term_instance::to_z3(matrix_propagator& propagator, z3::context& context, unordered_map<term_instance*, optional<z3::expr>>& map) {
+    optional<z3::expr> e;
+    if (tryGetValue(map, this, e))
+        return *e;
+    z3::expr_vector args(context);
+    for (term* arg: t->Args) {
+        args.push_back(arg->get_instance(cpy_idx(), propagator)->to_z3(propagator, context, map));
+    }
+    if (t->FuncID < 0)
+        e = FreshConstant(context, "var", t->Solver.get_z3_sort());
+    else
+        e = t->Solver.get_z3_sort().constructors()[t->FuncID](args);
+    map.insert(make_pair(this, e));
+    return *e;
 }
 
 unsigned term::solver_id() const { return Solver.id(); }

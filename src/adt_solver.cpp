@@ -98,7 +98,8 @@ bool complex_adt_solver::asserted(literal e, term_instance* lhs, term_instance* 
     assert(&lhs->t->Solver == &rhs->t->Solver);
     if (propagator().is_adt_split()) {
         return isTrue
-               ? lhs->t->Solver.unify_split(e, lhs, rhs)
+               ? //lhs->t->Solver.unify_split(e, lhs, rhs)
+               lhs->t->Solver.unify(e, lhs, rhs)
                : lhs->t->Solver.non_unify_split(prop->m.mk_not(e), lhs, rhs);
     }
     return isTrue
@@ -113,13 +114,13 @@ bool complex_adt_solver::preprocess_equality(term_instance* lhs, term_instance* 
     while (!stack.empty()) {
         auto [lhs2, rhs2] = stack.top();
         stack.pop();
-        if (lhs2->t->id() == rhs2->t->id() && (lhs2->cpyIdx() == rhs2->cpyIdx() || lhs2->t->is_ground()))
+        if (lhs2->t->id() == rhs2->t->id() && (lhs2->cpy_idx() == rhs2->cpy_idx() || lhs2->t->is_ground()))
             continue;
         if (lhs2->t->is_const() && rhs2->t->is_const()) {
             if (lhs2->t->FuncID != rhs2->t->FuncID)
                 return false;
             for (unsigned i = 0; i < lhs2->t->Args.size(); i++) {
-                stack.emplace(lhs2->t->Args[i]->get_instance(lhs2->cpyIdx(), propagator()), rhs2->t->Args[i]->get_instance(rhs2->cpyIdx(), propagator()));
+                stack.emplace(lhs2->t->Args[i]->get_instance(lhs2->cpy_idx(), propagator()), rhs2->t->Args[i]->get_instance(rhs2->cpy_idx(), propagator()));
             }
         }
         else {
@@ -172,7 +173,7 @@ formula complex_adt_solver::make_disequality_expr(term_instance* lhs, term_insta
 }
 
 literal complex_adt_solver::make_less_expr(term_instance* lhs, term_instance* rhs) {
-    if (lhs->t->id() == rhs->t->id() && (lhs->cpyIdx() == rhs->cpyIdx() || lhs->t->is_ground()))
+    if (lhs->t->id() == rhs->t->id() && (lhs->cpy_idx() == rhs->cpy_idx() || lhs->t->is_ground()))
         return prop->m.mk_false();
     if (lhs->t->is_const() == rhs->t->is_const()) {
         // TODO: Proper preprocessing
@@ -225,14 +226,94 @@ bool simple_adt_solver::soft_propagate(const justification& just, literal prop) 
     return propagator().soft_propagate(justExpr, prop);
 }
 
+void simple_adt_solver::ensure_founded() {
+    // Only required for Z3 expressions
+    if (any_of(domains.cbegin(), domains.cend(), [](const std::vector<unsigned>& o) { return o.empty(); }))
+        return;
+    string name = "a_" + complexSolver.get_solver_name(id());
+    int idx = 1;
+    if (contains_key(nameToId, name)) {
+        peek_term(name, 0);
+        return;
+    }
+    while (contains_key(nameToId, name + std::to_string(idx++))) {}
+    peek_term(name, 0);
+}
+
 bool complex_adt_solver::are_equal(term_instance* lhs, term_instance* rhs) {
     return lhs->t->Solver.solverId == rhs->t->Solver.solverId && lhs->t->Solver.are_equal(lhs, rhs);
+}
+
+void complex_adt_solver::make_z3_adt(z3::context& ctx) {
+    vector<vector<Z3_constructor>> constructors;
+    constructors.reserve(SortNames.size());
+    vector<Z3_symbol> constructor_names;
+    constructor_names.reserve(SortNames.size());
+
+    for (unsigned i = 0; i < solvers.size(); i++) {
+        auto& solver = *solvers[i];
+        constructor_names.push_back(Z3_mk_string_symbol(ctx, get_solver_name(i).c_str()));
+        solver.ensure_founded();
+        constructors.emplace_back();
+        constructors.back().reserve(solver.funcNames.size());
+        for (int j = 0; j < solver.funcNames.size(); j++) {
+            string funcName = solver.funcNames[j];
+            vector<unsigned>& domain = solver.domains[j];
+            unsigned arity = domain.size();
+
+            vector<Z3_symbol> fields;
+            fields.reserve(arity);
+            for (unsigned k = 0; k < arity; k++) {
+                fields.push_back(ctx.str_symbol((funcName + "_arg" + std::to_string(k)).c_str()));
+            }
+
+            Z3_symbol name = Z3_mk_string_symbol(ctx, funcName.c_str());
+            Z3_symbol recognizer = Z3_mk_string_symbol(ctx, ("is_" + funcName).c_str());
+            z3::sort s(ctx);
+            vector<Z3_sort> sorts;
+            sorts.reserve(arity);
+            for (unsigned k = 0; k < arity; k++) {
+                sorts.push_back(s);
+            }
+            auto* c = Z3_mk_constructor(ctx, name, recognizer,
+                                        arity, fields.data(),
+                                        sorts.data(), domain.data());
+
+            constructors[i].push_back(c);
+            nameToSolver.insert(make_pair(funcName, &solver));
+        }
+    }
+
+    unsigned n = constructor_names.size();
+    vector<Z3_constructor_list> constructorList;
+    constructorList.reserve(n);
+    vector<Z3_sort> n_res;
+    n_res.resize(n);
+    for (unsigned i = 0; i < n; i++) {
+        constructorList.push_back(Z3_mk_constructor_list(ctx, constructors[i].size(), constructors[i].data()));
+    }
+
+    Z3_mk_datatypes(ctx, n, constructor_names.data(), n_res.data(), constructorList.data());
+    for (unsigned i = 0; i < n; i++) {
+        solvers[i]->z3Sort = z3::sort(ctx, n_res[i]);
+    }
+
+    for (auto& list: constructors) {
+        for (auto* c: list) {
+            Z3_del_constructor(ctx, c);
+        }
+    }
+    for (auto& list : constructorList) {
+        Z3_del_constructor_list(ctx, list);
+    }
 }
 
 simple_adt_solver::~simple_adt_solver() {
     for (auto& list: hashCon) {
         delete list.second;
     }
+    if (z3Sort.has_value())
+        z3Sort.reset();
 }
 
 string simple_adt_solver::pretty_print(const term* t, unsigned cpyIdx,
@@ -376,44 +457,41 @@ bool simple_adt_solver::unify_split(literal just, term_instance* lhs, term_insta
 }
 
 bool simple_adt_solver::unify_split(term_instance* lhs, term_instance* rhs, justification& justList) {
-    assert(!lhs->t->is_const() || !rhs->t->is_const()); // Why did the simplifier fail?
+    assert(lhs != rhs);
+    assert(!lhs->t->is_const() || !rhs->t->is_const()); // Why would the simplifier fail?
     auto* r1 = lhs->find_root(propagator());
-    auto* r2 = lhs->find_root(propagator());
+    auto* r2 = rhs->find_root(propagator());
 
     if (r1 == r2)
         return true;
 
+    justList.add_equality(r1, lhs);
+    justList.add_equality(r2, rhs);
+
+    if (!merge_root(r1, r2, { lhs, rhs, justList })) {
+        conflict(justList);
+        return false;
+    }
+
     if (lhs == r1 && rhs == r2) {
-        if (!lhs->t->is_const()) {
-            lhs->eq_watches.emplace_back(lhs, rhs, justList);
+        /*if (!lhs->t->is_const()) {
+            lhs->eq_split_watches.emplace_back(lhs, rhs, justList);
             propagator().add_undo([lhs]() {
-                lhs->eq_watches.pop_back();
+                lhs->eq_split_watches.pop_back();
             });
         }
         if (!rhs->t->is_const()) {
-            rhs->eq_watches.emplace_back(lhs, rhs, justList);
+            rhs->eq_split_watches.emplace_back(lhs, rhs, justList);
             propagator().add_undo([rhs]() {
-                rhs->eq_watches.pop_back();
+                rhs->eq_split_watches.pop_back();
             });
-        }
+        }*/
         return true;
-    }
-    if (lhs != r1) {
-        justList.add_equality(r1, lhs);
-    }
-    if (rhs != r2) {
-        justList.add_equality(r2, rhs);
     }
 
     formula f = complexSolver.make_equality_expr(r1, r2);
     assert(!f->is_true());
     if (f->is_false()) {
-        conflict(justList);
-        return false;
-    }
-
-    if (!merge_root(r1, r2, { lhs, rhs, justList })) {
-        assert(false);
         conflict(justList);
         return false;
     }
@@ -428,7 +506,55 @@ bool simple_adt_solver::unify_split(term_instance* lhs, term_instance* rhs, just
 }
 
 bool simple_adt_solver::non_unify_split(literal just, term_instance* lhs, term_instance* rhs) {
-    return true; // TODO: Implement
+    justification justList;
+    justList.add_literal(just);
+    return non_unify_split(lhs, rhs, justList);
+}
+
+bool simple_adt_solver::non_unify_split(term_instance* lhs, term_instance* rhs, justification& justList) {
+    assert(!lhs->t->is_const() || !rhs->t->is_const()); // Why would the simplifier fail?
+    auto* r1 = lhs->find_root(propagator());
+    auto* r2 = rhs->find_root(propagator());
+
+
+    justList.add_equality(r1, lhs);
+    justList.add_equality(r2, rhs);
+
+    if (r1 == r2) {
+        conflict(justList);
+        return true;
+    }
+
+    if (lhs == r1 && rhs == r2) {
+        if (!lhs->t->is_const()) {
+            lhs->diseq_split_watches.emplace_back(lhs, rhs, std::move(justList));
+            propagator().add_undo([lhs]() {
+                lhs->diseq_split_watches.pop_back();
+            });
+            return true;
+        }
+        assert(!rhs->t->is_const());
+        rhs->diseq_split_watches.emplace_back(lhs, rhs, std::move(justList));
+        propagator().add_undo([rhs]() {
+            rhs->diseq_split_watches.pop_back();
+        });
+        return true;
+    }
+
+    if (r1->t->is_const() && r2->t->is_const() && r1->t->FuncID != r2->t->FuncID)
+        return true;
+
+    formula f = complexSolver.make_disequality_expr(r1, r2);
+    assert(!f->is_true());
+    if (f->is_false()) {
+        conflict(justList);
+        return false;
+    }
+
+    if (f->is_literal())
+        return soft_propagate(justList, (literal)f);
+    propagate(justList, f);
+    return true;
 }
 
 bool simple_adt_solver::unify(literal just, term_instance* lhs, term_instance* rhs) {
@@ -438,7 +564,7 @@ bool simple_adt_solver::unify(literal just, term_instance* lhs, term_instance* r
 }
 
 bool simple_adt_solver::are_equal(term_instance* lhs, term_instance* rhs) {
-    if (lhs->t->id() == rhs->t->id() && (lhs->cpyIdx() == rhs->cpyIdx() || lhs->t->is_ground()))
+    if (lhs->t->id() == rhs->t->id() && (lhs->cpy_idx() == rhs->cpy_idx() || lhs->t->is_ground()))
         return true;
     if (lhs->t->is_ground() && rhs->t->is_ground() && lhs->t->id() != rhs->t->id())
         return false;
@@ -450,7 +576,7 @@ bool simple_adt_solver::are_equal(term_instance* lhs, term_instance* rhs) {
         if (r1->t->FuncID != r2->t->FuncID)
             return false;
         for (unsigned i = 0; i < r1->t->Args.size(); i++) {
-            if (!are_equal(r1->t->Args[i]->get_instance(r1->cpyIdx(), propagator()), r2->t->Args[i]->get_instance(r2->cpyIdx(), propagator())))
+            if (!are_equal(r1->t->Args[i]->get_instance(r1->cpy_idx(), propagator()), r2->t->Args[i]->get_instance(r2->cpy_idx(), propagator())))
                 return false;
         }
         return true;
@@ -460,7 +586,7 @@ bool simple_adt_solver::are_equal(term_instance* lhs, term_instance* rhs) {
 
 bool simple_adt_solver::unify(term_instance* lhs, term_instance* rhs, justification& justifications) {
 
-    if (lhs->t->id() == rhs->t->id() && (lhs->cpyIdx() == rhs->cpyIdx() || lhs->t->is_ground()))
+    if (lhs->t->id() == rhs->t->id() && (lhs->cpy_idx() == rhs->cpy_idx() || lhs->t->is_ground()))
         return true;
     if (lhs->t->is_ground() && rhs->t->is_ground() && lhs->t->id() != rhs->t->id()) {
         conflict(justifications);
@@ -481,7 +607,7 @@ bool simple_adt_solver::unify(term_instance* lhs, term_instance* rhs, justificat
             return false;
         }
         for (unsigned i = 0; i < r1->t->Args.size(); i++) {
-            if (!unify(r1->t->Args[i]->get_instance(r1->cpyIdx(), propagator()), r2->t->Args[i]->get_instance(r2->cpyIdx(), propagator()), justifications))
+            if (!unify(r1->t->Args[i]->get_instance(r1->cpy_idx(), propagator()), r2->t->Args[i]->get_instance(r2->cpy_idx(), propagator()), justifications))
                 return false;
         }
         justifications.remove_equality();
@@ -489,9 +615,7 @@ bool simple_adt_solver::unify(term_instance* lhs, term_instance* rhs, justificat
         return true;
     }
 
-    equality equality(lhs, rhs, { justifications });
-
-    if (merge_root(r1, r2, equality)) {
+    if (merge_root(r1, r2, { lhs, rhs, { justifications } })) {
         justifications.remove_equality();
         justifications.remove_equality();
         return true;
@@ -528,8 +652,8 @@ z3::check_result simple_adt_solver::non_unify(Lazy* lazy) {
                 lazy->prev.pop();
                 continue;
             }
-            lazy->LHS = current.lhs->t->Args[current.argIdx]->get_instance(current.lhs->cpyIdx(), propagator());
-            lazy->RHS = current.rhs->t->Args[current.argIdx]->get_instance(current.rhs->cpyIdx(), propagator());
+            lazy->LHS = current.lhs->t->Args[current.argIdx]->get_instance(current.lhs->cpy_idx(), propagator());
+            lazy->RHS = current.rhs->t->Args[current.argIdx]->get_instance(current.rhs->cpy_idx(), propagator());
             current.argIdx++;
         }
 
@@ -564,8 +688,8 @@ z3::check_result simple_adt_solver::non_unify(Lazy* lazy) {
         lazy->just.add_equality(lazy->RHS, r2);
 
         if (r1->t->Args.size() == 1) {
-            lazy->LHS = r1->t->Args[0]->get_instance(r1->cpyIdx(), propagator());
-            lazy->RHS = r2->t->Args[0]->get_instance(r2->cpyIdx(), propagator());
+            lazy->LHS = r1->t->Args[0]->get_instance(r1->cpy_idx(), propagator());
+            lazy->RHS = r2->t->Args[0]->get_instance(r2->cpy_idx(), propagator());
             continue;
         }
 
@@ -586,7 +710,7 @@ bool simple_adt_solver::check_cycle(term_instance* inst, justification& justific
     auto* r = inst->find_root(propagator());
     justifications.add_equality(inst, r);
     for (auto* arg: inst->t->Args) {
-        if (!check_cycle(arg->get_instance(inst->cpyIdx(), propagator()), r, justifications))
+        if (!check_cycle(arg->get_instance(inst->cpy_idx(), propagator()), r, justifications))
             return false;
     }
     justifications.remove_equality();
@@ -609,7 +733,7 @@ bool simple_adt_solver::check_cycle(term_instance* inst, term_instance* search, 
 
     justifications.add_equality(inst, r);
     for (auto* arg: r->t->Args) {
-        if (!check_cycle(arg->get_instance(r->cpyIdx(), propagator()), search, justifications))
+        if (!check_cycle(arg->get_instance(r->cpy_idx(), propagator()), search, justifications))
             return false;
     }
     justifications.remove_equality();
@@ -709,12 +833,12 @@ bool simple_adt_solver::less(literal just, term_instance* lhs, term_instance* rh
             cases2.reserve(i + 1);
             for (unsigned j = 0; j < i; j++) {
                 cases2[j] = complexSolver.make_equality_expr(
-                        r1->t->Args[j]->get_instance(r1->cpyIdx(), propagator()),
-                        r2->t->Args[j]->get_instance(r2->cpyIdx(), propagator()));
+                        r1->t->Args[j]->get_instance(r1->cpy_idx(), propagator()),
+                        r2->t->Args[j]->get_instance(r2->cpy_idx(), propagator()));
             }
             cases2[i] = complexSolver.make_less_expr(
-                    r1->t->Args[i]->get_instance(r1->cpyIdx(), propagator()),
-                    r2->t->Args[i]->get_instance(r2->cpyIdx(), propagator()));
+                    r1->t->Args[i]->get_instance(r1->cpy_idx(), propagator()),
+                    r2->t->Args[i]->get_instance(r2->cpy_idx(), propagator()));
             cases[i] = propagator().m.mk_and(cases2);
         }
         if (eq) {
@@ -722,8 +846,8 @@ bool simple_adt_solver::less(literal just, term_instance* lhs, term_instance* rh
             cases2.reserve(r1->t->Args.size());
             for (int i = 0; i < r1->t->Args.size(); i++) {
                 cases2[i] = complexSolver.make_equality_expr(
-                        r1->t->Args[i]->get_instance(r1->cpyIdx(), propagator()),
-                        r2->t->Args[i]->get_instance(r2->cpyIdx(), propagator()));
+                        r1->t->Args[i]->get_instance(r1->cpy_idx(), propagator()),
+                        r2->t->Args[i]->get_instance(r2->cpy_idx(), propagator()));
             }
             cases[r1->t->Args.size()] = propagator().m.mk_and(cases2);
         }
@@ -827,16 +951,35 @@ bool simple_adt_solver::add_root(term_instance* b, term_instance* newRoot, bool 
     add_range(newRoot->greater, b->greater);
 
     if (complexSolver.propagator().is_adt_split()) {
-        unsigned prevIdx = b->eq_watches_idx;
-        propagator().add_undo([b, prevIdx]() { b->eq_watches_idx = prevIdx; });
-        for (; b->eq_watches_idx < b->eq_watches.size(); b->eq_watches_idx++) {
-            auto watch = b->eq_watches[b->eq_watches_idx];
+        /*unsigned prevIdx = b->eq_split_watches_idx;
+        propagator().add_undo([b, prevIdx]() { b->eq_split_watches_idx = prevIdx; });
+        for (; b->eq_split_watches_idx < b->eq_split_watches.size(); b->eq_split_watches_idx++) {
+            auto watch = b->eq_split_watches[b->eq_split_watches_idx];
             if (!unify_split(watch.LHS, watch.RHS, watch.just))
+                return false;
+        }*/
+        unsigned prevIdx = b->diseq_split_watches_idx;
+        unsigned cnt = b->diseq_split_watches.size();
+        propagator().add_undo([b, prevIdx]() { b->diseq_split_watches_idx = prevIdx; });
+        for (; b->diseq_split_watches_idx < cnt; b->diseq_split_watches_idx++) {
+            auto watch = b->diseq_split_watches[b->diseq_split_watches_idx];
+            if (!non_unify_split(watch.LHS, watch.RHS, watch.just))
+                return false;
+        }
+
+        prevIdx = newRoot->diseq_split_watches_idx;
+        cnt = newRoot->diseq_split_watches.size();
+        propagator().add_undo([newRoot, prevIdx]() { newRoot->diseq_split_watches_idx = prevIdx; });
+        for (; newRoot->diseq_split_watches_idx < cnt; newRoot->diseq_split_watches_idx++) {
+            auto watch = newRoot->diseq_split_watches[newRoot->diseq_split_watches_idx];
+            if (!non_unify_split(watch.LHS, watch.RHS, watch.just))
                 return false;
         }
     }
-    if (!update_diseq(b, newRoot))
-        return false;
+    else {
+        if (!update_diseq(b, newRoot))
+            return false;
+    }
     if (incIneq) {
         if (!update_ineq(newRoot))
             return false;

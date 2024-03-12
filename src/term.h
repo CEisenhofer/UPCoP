@@ -266,8 +266,10 @@ struct term_instance {
     vector<tuple<term_instance*, bool, justification>> smaller;
 
     // watches
-    vector<equality> eq_watches;
-    unsigned eq_watches_idx = 0;
+    //vector<equality> eq_split_watches;
+    //unsigned eq_split_watches_idx = 0;
+    vector<equality> diseq_split_watches;
+    unsigned diseq_split_watches_idx = 0;
     vector<Lazy*> diseq_watches;
     vector<tuple<term_instance*, term_instance*, bool, literal>> smaller_watches;
 
@@ -279,16 +281,20 @@ private:
     term_instance(const term* term, clause_instance* origin) : t(term), origin(origin), parent(this) { }
 
 public:
+
+    term_instance(const term_instance&) = delete;
+    term_instance& operator=(const term_instance&) = delete;
+
     static term_instance* new_instance(const term* term, clause_instance* origin) {
         return new term_instance(term, origin);
     }
 
-    unsigned cpyIdx() const;
+    unsigned cpy_idx() const;
 
     term_instance* find_root(propagator_base& propagator);
 
     inline bool operator==(const term_instance& other) const {
-        bool ret = *t == *other.t && cpyIdx() == other.cpyIdx();
+        bool ret = *t == *other.t && cpy_idx() == other.cpy_idx();
         assert (!ret || origin == other.origin);
         return ret;
     }
@@ -301,14 +307,16 @@ public:
         if (this == other)
             return 0;
         int ret = t->compare_to(other->t);
-        return ret != 0 ? ret : (cpyIdx() < other->cpyIdx() ? -1 : cpyIdx() > other->cpyIdx() ? 1 : 0);
+        return ret != 0 ? ret : (cpy_idx() < other->cpy_idx() ? -1 : cpy_idx() > other->cpy_idx() ? 1 : 0);
     }
 
     string to_string() const {
         if (t->is_ground())
             return t->to_string();
-        return t->to_string() + "#" + std::to_string(cpyIdx());
+        return t->to_string() + "#" + std::to_string(cpy_idx());
     }
+
+    z3::expr to_z3(matrix_propagator& propagator, z3::context& context, unordered_map<term_instance*, optional<z3::expr>>& map);
 };
 
 

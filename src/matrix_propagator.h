@@ -11,7 +11,7 @@ struct path_element {
 
 struct clause_instance {
     const indexed_clause* clause;
-    const unsigned copy_idx;
+    const unsigned copyIdx;
     const literal selector;
 #ifndef PUSH_POP
     bool propagated;
@@ -26,22 +26,13 @@ struct clause_instance {
     auto operator=(clause_instance& other) = delete;
 
     clause_instance(const indexed_clause* clause, unsigned copyIdx, literal selectionExpr, vector<ground_literal> literals) :
-            clause(clause), copy_idx(copyIdx), selector(selectionExpr),
+            clause(clause), copyIdx(copyIdx), selector(selectionExpr),
 #ifndef PUSH_POP
             propagated(false),
 #endif
             value(undef), literals(std::move(literals)) { }
 
-    /*vector<literal> GetVariables(PropagatorBase& propagator, DatatypeSort[] sorts) {
-        vector<literal> variables;
-        variables.resize(sorts.size());
-        for (int i = 0; i < variables.size(); i++) {
-            variables[i] = propagator.new_observed_var(OPT("arg" + i, sorts[i]));
-        }
-        return variables;
-    }*/
-
-    string to_string() const { return std::to_string(copy_idx + 1) + ". copy of clause #" + std::to_string(clause->Index); }
+    string to_string() const { return std::to_string(copyIdx + 1) + ". copy of clause #" + std::to_string(clause->Index); }
 };
 
 class matrix_propagator : public propagator_base {
@@ -100,7 +91,7 @@ public:
 
     bool are_connected(const ground_literal& l1, const ground_literal& l2);
 
-    void check_proof(const vector<clause_instance*>& chosen);
+    void check_proof(z3::context& ctx);
 
     clause_instance* get_ground(const indexed_clause* clause, unsigned cpy);
 
@@ -131,13 +122,13 @@ public:
         unordered_map<clause_instance*, int> clauseToCnt;
         sort(chosen.begin(), chosen.end(), [](const clause_instance* c1, const clause_instance* c2) {
             if (c1->clause->Index == c2->clause->Index)
-                return c1->copy_idx < c2->copy_idx;
+                return c1->copyIdx < c2->copyIdx;
             return c1->clause->Index < c2->clause->Index;
         });
 
         for (auto& clause : chosen) {
             clauseToCnt.insert(make_pair(clause, clauseCnt));
-            std::cout << "Clause &" << clauseCnt++ << " (#" << clause->clause->Index << "/" << clause->copy_idx << "): " << clause_to_string(clause->literals, &prettyNames) << "\n";
+            std::cout << "Clause &" << clauseCnt++ << " (#" << clause->clause->Index << "/" << clause->copyIdx << "): " << clause_to_string(clause->literals, &prettyNames) << "\n";
             int cnt = 0;
             if (tryGetValue(usedClauses, clause->clause->Index, cnt))
                 usedClauses[clause->clause->Index] = cnt + 1;
@@ -159,8 +150,8 @@ public:
 
                         for (int m = 0; m < chosen[i]->literals[k].arity(); m++) {
                             bool res = term_solver.asserted(this->m.mk_true(),
-                                                            chosen[i]->literals[k].lit->arg_bases[m]->get_instance(chosen[i]->copy_idx, *this),
-                                                            chosen[j]->literals[l].lit->arg_bases[m]->get_instance(chosen[j]->copy_idx, *this), true);
+                                                            chosen[i]->literals[k].lit->arg_bases[m]->get_instance(chosen[i]->copyIdx, *this),
+                                                            chosen[j]->literals[l].lit->arg_bases[m]->get_instance(chosen[j]->copyIdx, *this), true);
                             if (!res)
                                 throw solving_exception("Failed unification");
                         }
@@ -168,8 +159,6 @@ public:
                 }
             }
         }
-
-        check_proof(chosen);
     }
 
 };

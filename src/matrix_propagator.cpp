@@ -157,35 +157,67 @@ bool matrix_propagator::are_connected(const ground_literal& l1, const ground_lit
     return res;
 }
 
-void matrix_propagator::check_proof(const vector<clause_instance*>& chosen) {
+void matrix_propagator::check_proof(z3::context& ctx) {
     if (!progParams.CheckProof)
         return;
 
-#if false
-    unordered_map<termInstance, z3::expr> lookup;
+    z3::solver z3Solver(ctx);
 
-        for (auto (v, cpy, ass, cpy2) : ADTSolver.Assignments) {
-            z3::expr lhs = v.ToNewZ3(this, cpy, lookup);
-            z3::expr rhs = ass.ToNewZ3(this, cpy2, lookup);
-            uniSolver.add(Eq(lhs, rhs));
+    unordered_map<term_instance*, optional<z3::expr>> lookup;
+    z3::expr_vector clauses(ctx);
+
+    for (clause_instance* c : chosen) {
+        assert(c->value == sat);
+        vector<term_instance*> terms;
+        z3::expr_vector literal(ctx);
+
+        for (ground_literal l: c->literals) {
+            z3::expr_vector args(ctx);
+            z3::sort_vector argSorts(ctx);
+            for (term* t: l.lit->arg_bases) {
+                term_instance* inst = t->get_instance(l.copyIdx, *this);
+                terms.push_back(inst);
+                args.push_back(inst->to_z3(*this, ctx, lookup));
+                argSorts.push_back(inst->t->Solver.get_z3_sort());
+            }
+            z3::expr e = ctx.function(l.lit->name.c_str(), argSorts, ctx.bool_sort())(args);
+            if (!l.lit->polarity)
+                e = !e;
+            literal.push_back(e);
         }
 
-        auto res = uniSolver.Check();
-        if (res != Status.SATISFIABLE)
-            throw new Exception("Could not verify consistency of connections");
-        for (var clause : chosen) {
-            uniSolver.Add(clause.ToNewZ3(this, lookup));
+        clauses.push_back(mk_or(literal));
+
+        for (auto* inst: terms) {
+            if (inst->is_root())
+                continue;
+            z3Solver.add(inst->to_z3(*this, ctx, lookup) == inst->find_root(*this)->to_z3(*this, ctx, lookup));
         }
-        // TODO: Remove #if DEBUG
-        res = uniSolver.Check();
-        if (res != unsat) {
-            cout << "Could not verify proof" << endl;
-            exit(130);
-        }
-        cout << "Proof verified successful!" << endl;
-#else
-    throw solving_exception("Not implemented!");
+    }
+
+
+    z3::check_result res = z3Solver.check();
+    if (res != z3::check_result::sat) {
+        cout << "Could not verify consistency of connections" << endl;
+        exit(130);
+    }
+    for (auto clause : clauses) {
+        z3Solver.add(clause);
+    }
+
+#ifndef NDEBUG
+    auto assertions = z3Solver.assertions();
+    for (unsigned i = 0; i < assertions.size(); i++) {
+        std::cout << "Assertion: " << assertions[i] << std::endl;
+    }
 #endif
+
+    res = z3Solver.check();
+    if (res != z3::check_result::unsat) {
+        cout << "Could not verify proof" << endl;
+        exit(130);
+    }
+    cout << "Proof verified successful!" << endl;
 }
 
 clause_instance* matrix_propagator::get_ground(const indexed_clause* clause, unsigned cpy) {
@@ -221,12 +253,12 @@ void matrix_propagator::assert_root() {
 #endif
 }
 
-vector<literal> just;
-vector<literal> prop;
-
 void matrix_propagator::pb_clause_limit() {
     if (progParams.Mode != Rectangle || pbPropagated)
         return;
+
+    static vector<literal> just;
+    static vector<literal> prop;
 
     bool upperLimit = chosen.size() == lvl;
     bool lowerLimit = allClauses.size() - not_chosen.size() == lvl;
@@ -249,7 +281,8 @@ void matrix_propagator::pb_clause_limit() {
         }
 
         for (auto* p: prop) {
-            soft_propagate(just, p);
+            if (!soft_propagate(just, p))
+                return;
         }
     }
     else if (lowerLimit) {
@@ -269,10 +302,13 @@ void matrix_propagator::pb_clause_limit() {
         }
 
         for (auto* p: prop) {
-            soft_propagate(just, p);
+            if (!soft_propagate(just, p))
+                return;
         }
     }
 }
+
+static unsigned fixedCnt = 0;
 
 void matrix_propagator::fixed(literal_term* e, bool value) {
     if (is_conflict_flag)
@@ -293,6 +329,8 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
             return;
         }
 
+        fixedCnt++;
+
         if (!value) {
             info->value = unsat;
             not_chosen.push_back(info);
@@ -312,10 +350,10 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
             propagate({ e }, GetGround(info->clause, i - 1)->selector);
         }*/
 
-        if (info->copy_idx > 0) {
-            auto val = cachedClauses[c][info->copy_idx - 1]->value;
+        if (info->copyIdx > 0) {
+            auto val = cachedClauses[c][info->copyIdx - 1]->value;
             if (val != sat) {
-                if (!soft_propagate({e}, get_ground(info->clause, info->copy_idx - 1)->selector))
+                if (!soft_propagate({e}, get_ground(info->clause, info->copyIdx - 1)->selector))
                     return;
             }
         }
@@ -326,6 +364,15 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
             chosen.back()->value = undef;
             chosen.pop_back();
         });
+
+        if (chosen.size() >= lvl) {
+            LogN("Too much " << fixedCnt);
+            assert(chosen.size() == lvl || pbPropagated);
+        }
+
+        if (chosen.size() == lvl && !pbPropagated) {
+            LogN("Exactly " << fixedCnt);
+        }
 
         // "Relevance propagation" of delayed equalities
         for (const auto& eq : info->delayedRelevantTrue) {
@@ -460,6 +507,36 @@ void matrix_propagator::final() {
         return;
 
     assert(!chosen.empty());
+    if (progParams.Mode == Rectangle && chosen.size() != lvl) {
+        if (chosen.size() < lvl) {
+            for (auto* clause: allClauses) {
+                if (clause->value == undef) {
+                    std::cout << "Unassigned: " << clause->clause->Index << "#" << clause->copyIdx << std::endl;
+                }
+            }
+        }
+        else {
+            std::sort(chosen.begin(), chosen.end(), [](clause_instance* a, clause_instance* b) {
+                if (a->clause->Index > b->clause->Index)
+                    return false;
+                if (a->clause->Index < b->clause->Index)
+                    return true;
+                if (a->copyIdx > b->copyIdx)
+                    return false;
+                if (a->copyIdx < b->copyIdx)
+                    return true;
+                return false;
+            });
+            for (auto* clause: chosen) {
+                std::cout << "Chose [" << (clause->value == tri_state::sat ? "sat" : clause->value == tri_state::unsat ? "unsat" : "unknown") << "]: " << clause->clause->Index << "#" << clause->copyIdx << std::endl;
+            }
+        }
+        assert(false);
+        exit(120);
+        return;
+    }
+    assert(progParams.Mode != Rectangle || chosen.size() == lvl);
+
     vector<vector<path_element>> paths;
     LogN("Final (" << ++finalCnt << ")");
     vector<clause_instance*> shuffledChosen(chosen);
@@ -575,7 +652,7 @@ void matrix_propagator::find_path(int clauseIdx, const vector<clause_instance*>&
         if (failed)
             continue;
 
-        path.emplace_back(*info->clause, info->copy_idx, l1);
+        path.emplace_back(*info->clause, info->copyIdx, l1);
         find_path(clauseIdx + 1, clauses, path, foundPaths, limit);
         if (foundPaths.size() >= limit)
             return;

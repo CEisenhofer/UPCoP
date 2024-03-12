@@ -35,8 +35,11 @@ bool std::equal_to<std::vector<formula_term*>>::operator()(const std::vector<for
 void CaDiCal_propagator::output_literals(const std::vector<literal>& lit) const {
     std::vector<literal> unassigned;
     std::vector<literal> wrong_val;
+    std::unordered_set<literal> seen;
     for (unsigned i = 0; i < lit.size(); i++) {
         literal j = lit[i];
+        if (seen.find(j) != seen.end())
+            continue;
         bool val = false;
         if (!get_value(j, val)) {
             unassigned.push_back(j);
@@ -45,6 +48,7 @@ void CaDiCal_propagator::output_literals(const std::vector<literal>& lit) const 
             wrong_val.push_back(j);
         }
         Log(literal_to_string(j));
+        seen.insert(j);
         if (i + 1 < lit.size())
             Log(", ");
     }
@@ -174,7 +178,7 @@ bool CaDiCal_propagator::soft_propagate(const std::vector<literal>& just, litera
     Log("Propagating (soft) [" << incCnt++ << "]: ");
     output_literals(just);
     Log(" => ");
-    LogN(prop->to_string());
+    LogN(prop->to_string() << " [" << prop->get_lit() << "]");
 #endif
 
     std::vector<int> j;
@@ -200,7 +204,7 @@ void CaDiCal_propagator::init_solver() {
     solver = new CaDiCaL::Solver();
     solver->set("ilb", 0);
     solver->set("ilbassumptions", 0);
-    // solver->set("chrono", 0);
+    solver->set("chrono", 0);
     // solver->set("phase", 0);
     solver->connect_external_propagator(this);
     reset_names();
@@ -211,6 +215,10 @@ void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
         bool value = lit > 0;
 
         const unsigned id = abs(lit);
+        if (!interesting[id - 1])
+            // ignore tseitin variables or alike
+            continue;
+
         literal v = m.mk_lit(id);
         LogN("Fixed: " << literal_to_string(v) << " := " << value << " [" << lit << "]");
         assert(hard_propagation_read_idx == 0);
@@ -233,27 +241,45 @@ void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
 void CaDiCal_propagator::notify_new_decision_level() {
     assert(hard_propagation_read_idx == 0);
     LogN("Pushed " + to_string(undo_stack_limit.size()));
+    decision_level++;
     undo_stack_limit.push_back(undo_stack.size());
-    soft_propagation_limit.push_back(soft_propagation_undo.size());
+    soft_propagation_limit.push_back(pending_soft_propagations.size());
+    soft_propagation_read_limit.push_back(soft_propagation_read_idx);
 
     assert(pending_hard_propagations.size() == pending_hard_propagations_idx);
-    // assert(pending_soft_propagations.empty());
+    // assert(pending_soft_propagations.size() == pending_soft_propagations_idx);
 }
 
 void CaDiCal_propagator::notify_backtrack(size_t new_level) {
+    assert(decision_level == undo_stack_limit.size());
+    if (new_level >= undo_stack_limit.size()) {
+        std::cout << "WTF: " << undo_stack_limit.size() << " -> " << new_level << std::endl;
+        assert(undo_stack_limit.empty());
+        // TODO: WTF?! CaDiCal went crazy
+        //undo_stack_limit.resize(new_level);
+        //decision_level = new_level;
+        return;
+    }
     assert(hard_propagation_read_idx == 0);
     LogN("Pop to " << new_level);
+    decision_level = new_level;
 
     is_conflict_flag = false;
 
-    soft_propagation_read_idx = 0;
-    pending_soft_propagations.clear();
-    const unsigned prevJust = soft_propagation_limit[new_level];
+    assert(soft_propagations_explanation_idx == 0);
+
+    const unsigned to = soft_propagation_read_idx; // maybe it conflicted before so just clear up to there
+    soft_propagation_read_idx = soft_propagation_read_limit[new_level];
+    const unsigned prevPending = soft_propagation_limit[new_level];
+    soft_propagation_read_limit.resize(new_level);
     soft_propagation_limit.resize(new_level);
-    for (unsigned i = prevJust; i < soft_propagation_undo.size(); i++) {
-        soft_justifications[soft_propagation_undo[i]].clear();
+
+    for (unsigned i = soft_propagation_read_idx; i < to; i++) {
+        assert(soft_justifications[literal_to_idx(pending_soft_propagations[i].second)].size() > 1);
+        soft_justifications[literal_to_idx(pending_soft_propagations[i].second)].clear();
     }
-    soft_propagation_undo.resize(prevJust);
+    pending_soft_propagations.resize(prevPending);
+    assert(soft_propagation_read_idx <= pending_soft_propagations.size());
 
     const unsigned prevAction = undo_stack_limit[new_level];
     undo_stack_limit.resize(new_level);
@@ -265,7 +291,7 @@ void CaDiCal_propagator::notify_backtrack(size_t new_level) {
 
 bool CaDiCal_propagator::cb_check_found_model(const std::vector<int>& model) {
     assert(hard_propagation_read_idx == 0);
-    assert(soft_propagation_read_idx == 0);
+    assert(soft_propagation_read_idx == pending_soft_propagations.size());
     assert(!is_conflict());
     final();
     return pending_hard_propagations.size() == pending_hard_propagations_idx &&
@@ -278,26 +304,35 @@ int CaDiCal_propagator::cb_propagate() {
     if (is_conflict())
         return 0;
     invCnt++;
-    if (pending_soft_propagations.empty())
+    if (soft_propagation_read_idx >= pending_soft_propagations.size())
         return 0;
-    auto& [just, prop] = pending_soft_propagations.back();
+    auto& [just, prop] = pending_soft_propagations[soft_propagation_read_idx++];
     int ret = prop;
-    const int idx = literal_to_idx(ret);
-    soft_justifications[idx] = std::move(just);
-    soft_propagation_undo.push_back(idx);
-    pending_soft_propagations.pop_back();
+    const unsigned idx = literal_to_idx(ret);
+    soft_justifications[idx] = just;
 #ifdef PUSH_POP
     undo_stack.emplace_back([this, idx](){ soft_justifications[idx].clear(); });
 #endif
+    LogN("Enforced " << ret);
     return ret;
 }
 
+
+static int reasCnt = 0;
+
 int CaDiCal_propagator::cb_add_reason_clause_lit(int propagated_lit) {
     unsigned idx = literal_to_idx(propagated_lit);
-    assert(soft_justifications[idx].size() > 0);
-    if (soft_propagation_read_idx < soft_justifications[idx].size())
-        return soft_justifications[idx][soft_propagation_read_idx++];
-    soft_propagation_read_idx = 0;
+    assert(!soft_justifications[idx].empty());
+    if (soft_propagations_explanation_idx == 0) {
+        reasCnt++;
+        Log("Reason [" << reasCnt << "] for " << propagated_lit << ":");
+    }
+    if (soft_propagations_explanation_idx < soft_justifications[idx].size()) {
+        Log(" " << soft_justifications[idx][soft_propagations_explanation_idx]);
+        return soft_justifications[idx][soft_propagations_explanation_idx++];
+    }
+    LogN("");
+    soft_propagations_explanation_idx = 0;
     return 0;
 }
 
@@ -343,7 +378,7 @@ const literal_term* not_term::get_lits(CaDiCal_propagator& propagator, std::vect
     assert(!t->is_true() && !t->is_false());
 
     if (var_id == 0)
-        var_id = propagator.new_observed_var(OPT("<" + to_string() + ">"));
+        var_id = propagator.new_var(OPT("<" + to_string() + ">"));
     else if (active)
         return manager.mk_lit(var_id);
     else
@@ -360,7 +395,7 @@ const literal_term* not_term::get_lits(CaDiCal_propagator& propagator, std::vect
 
 const literal_term* and_term::get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) {
     if (var_id == 0)
-        var_id = propagator.new_observed_var(OPT("<" + to_string() + ">"));
+        var_id = propagator.new_var(OPT("<" + to_string() + ">"));
     else if (active)
         return manager.mk_lit(var_id);
     else
@@ -393,7 +428,7 @@ const literal_term* and_term::get_lits(CaDiCal_propagator& propagator, std::vect
 
 const literal_term* or_term::get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) {
     if (var_id == 0)
-        var_id = propagator.new_observed_var(OPT("<" + to_string() + ">"));
+        var_id = propagator.new_var(OPT("<" + to_string() + ">"));
     else if (active)
         return manager.mk_lit(var_id);
     else

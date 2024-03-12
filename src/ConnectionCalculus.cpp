@@ -87,7 +87,10 @@ static string ConvertByVampire(const string& content, bool tptp) {
         close(toPipe[0]);
         close(fromPipe[1]);
 
-        write(toPipe[1], content.c_str(), content.size());
+        if (write(toPipe[1], content.c_str(), content.size()) == -1) {
+            perror("write");
+            exit(130);
+        }
         close(toPipe[1]);
 
         char buffer[4096] = { 0 };
@@ -267,6 +270,9 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         prep_core(cnf, progParams);
     }
 
+    if (progParams.CheckProof)
+        adtSolver.make_z3_adt(context);
+
     int timeLeft = progParams.Timeout == 0 ? INT_MAX : progParams.Timeout;
     auto* propagator = new matrix_propagator(cnf, adtSolver, progParams, literalCnt);
 
@@ -349,9 +355,9 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
                                          return false;
                                      if (a.first->t->FuncID < b.first->t->FuncID)
                                          return true;
-                                     if (a.first->cpyIdx() > b.first->cpyIdx())
+                                     if (a.first->cpy_idx() > b.first->cpy_idx())
                                          return false;
-                                     if (a.first->cpyIdx() < b.first->cpyIdx())
+                                     if (a.first->cpy_idx() < b.first->cpy_idx())
                                          return true;
                                      return a.first->t->solver_id() > b.first->t->solver_id();
                                  });
@@ -360,7 +366,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
             auto* interpretation = s.first->find_root(*propagator);
             if (interpretation != s.first)
                 cout << "Substitution: " << s.second << " -> "
-                     << interpretation->t->pretty_print(interpretation->cpyIdx(), &prettyNames) << '\n';
+                     << interpretation->t->pretty_print(interpretation->cpy_idx(), &prettyNames) << '\n';
         }
 
         cout << "Usage statistics:" << std::endl;
@@ -368,6 +374,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         for (auto& sorted: sortedUsed) {
             cout << "\tClause #" << sorted.first << ": " << sorted.second << endl;
         }
+        propagator->check_proof(context);
         deleteCNF(cnf);
         delete propagator;
         return unsat;

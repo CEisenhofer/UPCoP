@@ -67,6 +67,8 @@ public:
     void peek_term(const string& solver, const string& name, int argCnt);
 
     static bool are_equal(term_instance* lhs, term_instance* rhs);
+
+    void make_z3_adt(z3::context& ctx);
 };
 
 class simple_adt_solver {
@@ -88,6 +90,8 @@ class simple_adt_solver {
     void propagate(const justification& just, formula prop);
     bool soft_propagate(const justification& just, literal prop);
 
+    void ensure_founded();
+
 public:
 
     simple_adt_solver(complex_adt_solver& complexSolver, unsigned id) : complexSolver(complexSolver), solverId(id) { }
@@ -100,6 +104,10 @@ public:
 
     inline unsigned id() const {
         return solverId;
+    }
+
+    inline z3::sort get_z3_sort() const {
+        return *z3Sort;
     }
 
     string pretty_print(const term* t, unsigned cpyIdx, unordered_map<term_instance*, string>* prettyNames) const;
@@ -129,6 +137,7 @@ public:
     bool unify_split(literal just, term_instance* lhs, term_instance* rhs);
     bool unify_split(term_instance* lhs, term_instance* rhs, justification& just);
     bool non_unify_split(literal just, term_instance* lhs, term_instance* rhs);
+    bool non_unify_split(term_instance* lhs, term_instance* rhs, justification& just);
     bool unify(literal just, term_instance* lhs, term_instance* rhs);
     bool are_equal(term_instance* lhs, term_instance* rhs);
     bool non_unify(literal just, term_instance* lhs, term_instance* rhs);

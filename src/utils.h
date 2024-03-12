@@ -203,6 +203,7 @@ inline z3::expr FreshUserConstant(z3::context& ctx, const string& prefix, const 
 
 inline z3::expr FreshConstant(z3::context& ctx, const string& prefix, const z3::sort& sort) {
     Z3_ast e = Z3_mk_fresh_const(ctx, prefix.c_str(), sort);
+    //Z3_ast e = Z3_mk_fresh_const(ctx, prefix.c_str(), sort);
     return { ctx, e };
 }
 

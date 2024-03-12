@@ -325,24 +325,28 @@ protected:
 private:
     int var_cnt = 0;
     std::vector<unsigned> undo_stack_limit;
+    unsigned decision_level = 0;
 
     unsigned pending_hard_propagations_idx = 0;
     unsigned hard_propagation_read_idx = 0;
     std::vector<std::vector<int>> pending_hard_propagations;
 
     std::vector<unsigned> soft_propagation_limit;
-    std::vector<unsigned> soft_propagation_undo;
+    std::vector<unsigned> soft_propagation_read_limit;
     std::vector<std::pair<std::vector<int>, int>> pending_soft_propagations;
+    // unfortunately we cannot just assume that this list is empty on push (...)
+    unsigned soft_propagations_explanation_idx = 0;
     std::vector<std::vector<int>> soft_justifications;
     unsigned soft_propagation_read_idx = 0;
 
     std::vector<tri_state> interpretation;
+    std::vector<bool> interesting;
 
     // for persistent propagation
     std::unordered_set<std::vector<int>> prev_propagations;
 
     unsigned literal_to_idx(int lit) const {
-        return 2 * abs(lit) + (unsigned)(lit < 0);
+        return 2 * abs(lit) + (unsigned)(lit < 0) - 2 /* 0 is not a valid literal*/;
     }
 
 protected:
@@ -418,19 +422,14 @@ protected:
         return interpretation[abs(v->get_lit()) - 1] != undef;
     }
 
-    int new_var_raw() {
+    int new_var_raw(bool is_interesting) {
         int newId = ++var_cnt;
         soft_justifications.emplace_back();
         soft_justifications.emplace_back();
         assert(2 * var_cnt == soft_justifications.size());
         interpretation.push_back(undef);
+        interesting.push_back(is_interesting);
         assert(var_cnt == interpretation.size());
-        return newId;
-    }
-
-    int new_observed_var_raw() {
-        signed newId = new_var_raw();
-        solver->add_observed_var(newId);
         return newId;
     }
 
@@ -440,22 +439,31 @@ public:
 #ifndef NDEBUG
 
     inline int new_observed_var(const std::string& name) {
-        int id = new_observed_var_raw();
-        names.insert(std::make_pair(id, name));
-        return id;
+        signed newId = new_var_raw(true);
+        solver->add_observed_var(newId);
+        names.insert(std::make_pair(newId, name));
+        return newId;
     }
 
-    inline int new_var() {
-        return new_var_raw();
+    inline int new_var(const std::string& name) {
+        signed newId = new_var_raw(false);
+        solver->add_observed_var(newId);
+        names.insert(std::make_pair(newId, name));
+        return newId;
     }
 
 #else
-    int new_var() {
-        return new_var_raw();
-    }
 
     int new_observed_var() {
-        return new_observed_var_raw();
+        signed newId = new_var_raw(true);
+        solver->add_observed_var(newId);
+        return newId;
+    }
+
+    int new_var() {
+        signed newId = new_var_raw(false);
+        solver->add_observed_var(newId);
+        return newId;
     }
 #endif
 
@@ -477,12 +485,6 @@ protected:
     void notify_new_decision_level() final;
 
     void notify_backtrack(size_t new_level) final;
-
-    void pop_to_root() {
-        if (undo_stack_limit.empty())
-            return;
-        notify_backtrack(0);
-    }
 
     virtual void final() = 0;
 
