@@ -74,7 +74,7 @@ class formula_manager {
     std::vector<literal_term*> cadical_to_formula;
     std::vector<literal_term*> neg_cadical_to_formula;
 
-    std::unordered_map<formula_term*, not_term*> not_cache;
+    std::unordered_map<formula_term*, formula_term*> not_cache;
     std::unordered_map<std::vector<formula_term*>, and_term*> and_cache;
     std::unordered_map<std::vector<formula_term*>, or_term*> or_cache;
 
@@ -170,6 +170,8 @@ public:
     // first:  1 -> inline the variable positively
     // first: -1 -> inline the variable negatively
     virtual const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) = 0;
+
+    virtual formula_term* negate() = 0;
 };
 
 class literal_term : public formula_term {
@@ -208,6 +210,11 @@ public:
     }
 
     const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) override;
+
+    formula_term* negate() final {
+        assert(false);
+        throw solving_exception("Should not call negate on literals");
+    }
 };
 
 class false_term : public literal_term {
@@ -246,6 +253,10 @@ public:
     }
 
     const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) override;
+
+    formula_term* negate() final {
+        return t;
+    }
 };
 
 class complex_term : public formula_term {
@@ -286,6 +297,15 @@ public:
     }
 
     const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) override;
+
+    formula_term* negate() final {
+        vector<formula_term*> negated;
+        negated.reserve(args.size());
+        for (auto* arg : args) {
+            negated.push_back(arg->negate());
+        }
+        return manager.mk_or(negated);
+    }
 };
 
 class or_term : public complex_term {
@@ -301,6 +321,15 @@ public:
     }
 
     const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) override;
+
+    formula_term* negate() final {
+        vector<formula_term*> negated;
+        negated.reserve(args.size());
+        for (auto* arg : args) {
+            negated.push_back(arg->negate());
+        }
+        return manager.mk_and(negated);
+    }
 };
 
 enum tri_state : unsigned char {

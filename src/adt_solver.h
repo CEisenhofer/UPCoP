@@ -11,7 +11,7 @@ class complex_adt_solver {
     unordered_map<literal, equality> exprToEq;
     unordered_map<literal, less_than> exprToLess;
     unordered_map<equality, formula> eqToExpr;
-    unordered_map<less_than, literal> lessToExpr;
+    unordered_map<less_than, formula> lessToExpr;
 
     matrix_propagator* prop = nullptr;
 
@@ -47,23 +47,32 @@ public:
 
     bool asserted(literal e, bool isTrue);
 
-    bool asserted(literal e, term_instance* lhs, term_instance* rhs, bool isTrue) const;
+    bool asserted_eq(literal e, term_instance* lhs, term_instance* rhs, bool isTrue) const;
 
     bool preprocess_equality(term_instance* lhs, term_instance* rhs, vector<equality>& subproblems);
-    bool preprocess_less(term_instance* lhs, term_instance* rhs, vector<pair<term_instance*, term_instance*>>& subproblems);
+    bool preprocess_less(stack<less_than> stack, vector<less_than>& subproblems, bool& eq);
+
+    bool preprocess_less(term_instance* lhs, term_instance* rhs, vector<less_than>& subproblems, bool& eq) {
+        stack<less_than> stack;
+        stack.emplace(lhs, rhs, false);
+        return preprocess_less(std::move(stack), subproblems, eq);
+    }
 
     formula make_equality_expr(term_instance* lhs, term_instance* rhs);
     formula make_disequality_expr(term_instance* lhs, term_instance* Rhs);
 
-    literal make_less_expr(term_instance* lhs, term_instance* rhs);
-    literal make_greater_eq_expr(term_instance* lhs, term_instance* rhs);
+    formula make_less_expr(vector<less_than> subproblems, bool eq);
+    formula make_less_expr(term_instance* lhs, term_instance* rhs);
 
-    literal make_less_eq_expr(term_instance* lhs, term_instance* rhs) {
+    formula make_greater_eq_expr(term_instance* lhs, term_instance* rhs);
+
+    formula make_less_eq_expr(term_instance* lhs, term_instance* rhs) {
         return make_greater_eq_expr(rhs, lhs);
     }
-    literal make_greater_expr(term_instance* lhs, term_instance* rhs) {
+    formula make_greater_expr(term_instance* lhs, term_instance* rhs) {
         return make_less_expr(rhs, lhs);
     }
+
 
     void peek_term(const string& solver, const string& name, int argCnt);
 
@@ -142,7 +151,7 @@ public:
     bool unify(literal just, term_instance* lhs, term_instance* rhs);
     bool are_equal(term_instance* lhs, term_instance* rhs);
     bool non_unify(literal just, term_instance* lhs, term_instance* rhs);
-    bool less(literal just, term_instance* lhs, term_instance* rhs, bool eq);
+    bool less(literal just, term_instance* lhs, term_instance* rhs);
 
 
 private:
@@ -151,9 +160,9 @@ private:
     z3::check_result non_unify(Lazy* lazy);
 
 
-    bool check_cycle(term_instance* inst, justification& justifications);
+    bool check_containment_cycle(term_instance* inst, justification& justifications);
     bool check_cycle(term_instance* inst, term_instance* search, justification& justifications);
-    bool check(term_instance* start, term_instance* current, bool eq, justification& just, vector<term_instance*>& path, bool smaller);
+    bool check_smaller_cycle(term_instance* start, term_instance* current, justification& just, vector<term_instance*>& path, bool smaller);
 
 
     bool add_root(term_instance* b, term_instance* newRoot, bool incIneq = true);

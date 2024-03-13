@@ -357,25 +357,23 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
                 if (!soft_propagate({ e }, get_ground(info->clause, info->copyIdx - 1)->selector))
                     return;
             }
+
 #ifndef PUSH_POP
             if (!info->propagated) {
 #endif
-                vector<formula> smaller;
-                for (unsigned i = 0; i < info->clause->variables.size(); i++) {
-                    term* t1 = info->clause->variables[i];
-                    term_instance* inst1 = t1->get_instance(info->copyIdx, *this);
-                    term_instance* inst2 = t1->get_instance(info->copyIdx - 1, *this);
-                    vector<formula> cases;
-                    for (unsigned j = 0; j < i; j++) {
-                        term* t2 = info->clause->variables[j];
-                        term_instance* jnst1 = t2->get_instance(info->copyIdx, *this);
-                        term_instance* jnst2 = t2->get_instance(info->copyIdx - 1, *this);
-                        cases.push_back(term_solver.make_equality_expr(jnst1, jnst2));
-                    }
-                    cases.push_back(term_solver.make_less_expr(inst1, inst2));
-                    smaller.push_back(m.mk_and(cases));
+                stack<less_than> stack;
+                for (unsigned i = info->clause->variables.size(); i > 0; i--) {
+                    term* var = info->clause->variables[i - 1];
+                    stack.emplace(var->get_instance(info->copyIdx, *this),  var->get_instance(info->copyIdx - 1, *this), false);
                 }
-                hard_propagate({ e }, m.mk_or(smaller));
+                bool eq = false;
+                std::vector<less_than> subproblems;
+                bool res = term_solver.preprocess_less(std::move(stack), subproblems, eq);
+                assert(res);
+                assert(!subproblems.empty());
+                assert(!eq);
+                formula expr = term_solver.make_less_expr(subproblems, eq);
+                hard_propagate({ e }, expr);
 #ifndef PUSH_POP
             }
 #endif
@@ -388,21 +386,12 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
             chosen.pop_back();
         });
 
-        if (chosen.size() >= lvl) {
-            LogN("Too much " << fixedCnt);
-            assert(chosen.size() == lvl || pbPropagated);
-        }
-
-        if (chosen.size() == lvl && !pbPropagated) {
-            LogN("Exactly " << fixedCnt);
-        }
-
         // "Relevance propagation" of delayed equalities
         for (const auto& eq : info->delayedRelevantTrue) {
             try {
                 assert(eq.just.litJust.size() == 1 && eq.just.eqJust.empty());
                 LogN("Delayed: " << eq.to_string() << " := 1");
-                if (!term_solver.asserted(eq.just.litJust[0], eq.LHS, eq.RHS, true))
+                if (!term_solver.asserted_eq(eq.just.litJust[0], eq.LHS, eq.RHS, true))
                     return;
             }
             catch (...) {
@@ -414,7 +403,18 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
             try {
                 assert(eq.just.litJust.size() == 1 && eq.just.eqJust.empty());
                 LogN("Delayed: " << eq.to_string() << " := 0");
-                if (!term_solver.asserted(eq.just.litJust[0], eq.LHS, eq.RHS, false))
+                if (!term_solver.asserted_eq(eq.just.litJust[0], eq.LHS, eq.RHS, false))
+                    return;
+            }
+            catch (...) {
+                cout << "Crashed unify" << endl;
+                exit(132);
+            }
+        }
+        for (const auto& less : info->delayedRelevantLess) {
+            try {
+                LogN("Delayed: " << less.to_string());
+                if (!term_solver.asserted_eq(less.just, less.LHS, less.RHS, less.eq))
                     return;
             }
             catch (...) {

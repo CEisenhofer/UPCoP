@@ -7,7 +7,7 @@ static void CrashParams(const std::string& error) {
     if (!error.empty())
         std::cout << "Error: " << error << '\n';
     std::cout
-            << "Usage: ConnectionCalculus [-d initial_depth] [-dm max_depth] [-t timeout : ms] [-m [core|rect] [--input_syntax [tptp|smtlib]] [--no-preprocess] [--preprocess] [--conj] [-c [auto|keep|pos|neg|min]] [--split] [--check] path-to-smt2"
+            << "Usage: ConnectionCalculus [-d initial_depth] [-dm max_depth] [-t timeout : ms] [-m [core|rect] [--input_syntax [tptp|smtlib]] [--no-preprocess] [--preprocess] [--conj] [-c [auto|keep|pos|neg|min]] [--split] [--check_smaller_cycle] path-to-smt2"
             << std::endl;
     exit(-1);
 }
@@ -84,7 +84,7 @@ void parse_params(int argc, char* argv[], ProgParams& progParams) {
             i++;
             continue;
         }
-        if (current == "--check") {
+        if (current == "--check_smaller_cycle") {
             progParams.CheckProof = true;
             i++;
             continue;
@@ -132,6 +132,8 @@ void parse_params(int argc, char* argv[], ProgParams& progParams) {
         CrashParams("Maximum depth has to be at least as high as the starting depth");
     if (!progParams.Preprocess && progParams.Format == TPTP)
         CrashParams("TPTP input is only supported with preprocessing");
+    if (argc < 2 || !std::filesystem::exists(argv[argc - 1]))
+        CrashParams("File " + std::string(argv[argc - 1]) + " does not exist");
     if (progParams.Depth > 1)
         std::cout << "Warning: Did not start with level 1. Run might be incomplete (unlikely but possible)" << std::endl;
 }

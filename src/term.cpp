@@ -90,6 +90,8 @@ string position::to_string() const {
 }
 
 string less_than::to_string() const {
+    if (eq)
+        return LHS->to_string() + " <= " + RHS->to_string();
     return LHS->to_string() + " < " + RHS->to_string();
 }
 #endif
@@ -120,7 +122,7 @@ size_t hash<equality>::operator()(const equality& x) const {
 size_t hash<less_than>::operator()(const less_than& x) const {
     auto h = (size_t)x.LHS;
     h ^= (size_t)x.RHS + 0x9e3779b9 + (h << 6) + (h >> 2);
-    return h;
+    return h + x.eq;
 }
 
 unsigned term_instance::cpy_idx() const {

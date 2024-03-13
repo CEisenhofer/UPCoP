@@ -20,6 +20,7 @@ struct clause_instance {
     const vector<ground_literal> literals;
     vector<equality> delayedRelevantTrue;
     vector<equality> delayedRelevantFalse;
+    vector<less_than> delayedRelevantLess;
 
     clause_instance() = delete;
     clause_instance(clause_instance& other) = delete;
@@ -149,9 +150,9 @@ public:
                                 chosen[j]->literals[l], &prettyNames) << "\n";
 
                         for (int m = 0; m < chosen[i]->literals[k].arity(); m++) {
-                            bool res = term_solver.asserted(this->m.mk_true(),
-                                                            chosen[i]->literals[k].lit->arg_bases[m]->get_instance(chosen[i]->copyIdx, *this),
-                                                            chosen[j]->literals[l].lit->arg_bases[m]->get_instance(chosen[j]->copyIdx, *this), true);
+                            bool res = term_solver.asserted_eq(this->m.mk_true(),
+                                                               chosen[i]->literals[k].lit->arg_bases[m]->get_instance(chosen[i]->copyIdx, *this),
+                                                               chosen[j]->literals[l].lit->arg_bases[m]->get_instance(chosen[j]->copyIdx, *this), true);
                             if (!res)
                                 throw solving_exception("Failed unification");
                         }

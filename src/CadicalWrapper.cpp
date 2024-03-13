@@ -264,17 +264,15 @@ void CaDiCal_propagator::notify_new_decision_level() {
     soft_propagation_read_limit.push_back(soft_propagation_read_idx);
 
     assert(pending_hard_propagations.size() == pending_hard_propagations_idx);
-    // assert(pending_soft_propagations.size() == pending_soft_propagations_idx);
+    assert(pending_soft_propagations.size() == soft_propagation_read_idx);
 }
 
 void CaDiCal_propagator::notify_backtrack(size_t new_level) {
     assert(decision_level == undo_stack_limit.size());
     if (new_level >= undo_stack_limit.size()) {
-        // std::cout << "WTF: " << undo_stack_limit.size() << " -> " << new_level << std::endl;
+        // CaDiCal went crazy - let's ignore
+        assert(new_level == 0);
         assert(undo_stack_limit.empty());
-        // TODO: WTF?! CaDiCal went crazy
-        //undo_stack_limit.resize(new_level);
-        //decision_level = new_level;
         return;
     }
     assert(hard_propagation_read_idx == 0);
@@ -528,7 +526,7 @@ formula_term* formula_manager::mk_not(formula_term* c) {
     auto it = not_cache.find(c);
     if (it != not_cache.end())
         return it->second;
-    auto* ret = new not_term(*this, c);
+    formula_term* ret = c->negate();
     not_cache.insert(std::make_pair(c, ret));
     return ret;
 }

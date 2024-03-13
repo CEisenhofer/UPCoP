@@ -262,8 +262,8 @@ struct term_instance {
     unsigned cnt = 1;
 
     // PO node
-    vector<tuple<term_instance*, bool, justification>> greater;
-    vector<tuple<term_instance*, bool, justification>> smaller;
+    vector<tuple<term_instance*, justification>> greater;
+    vector<tuple<term_instance*, justification>> smaller;
 
     // watches
     //vector<equality> eq_split_watches;
@@ -287,6 +287,10 @@ public:
 
     static term_instance* new_instance(const term* term, clause_instance* origin) {
         return new term_instance(term, origin);
+    }
+
+    inline term_instance* get_arg(unsigned arg, matrix_propagator& propagator) {
+        return t->Args[arg]->get_instance(cpy_idx(), propagator);
     }
 
     unsigned cpy_idx() const;

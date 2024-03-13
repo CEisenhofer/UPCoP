@@ -38,23 +38,51 @@ simple_adt_solver* complex_adt_solver::get_solver(const string& name) {
 
 bool complex_adt_solver::asserted(literal e, bool isTrue) {
     equality info;
-    if (!tryGetValue(exprToEq, e, info))
-        return false;
-    //if (++cnt % 1000 == 0) {
-    //    cout << conflicts << " non-unify conflicts" << endl;
-    //}
+    clause_instance* lhsInfo;
+    clause_instance* rhsInfo;
+
+    if (!tryGetValue(exprToEq, e, info)) {
+        less_than info2;
+        if (!isTrue || !tryGetValue(exprToLess, e, info2))
+            return false;
+
+        lhsInfo = info2.LHS->origin;
+        rhsInfo = info2.RHS->origin;
+        if ((lhsInfo != nullptr && lhsInfo->value == unsat) || (rhsInfo != nullptr && rhsInfo->value == unsat)) {
+            LogN("Dropped");
+            return false;
+        }
+        if (lhsInfo != nullptr && lhsInfo->value == undef) {
+            LogN("Shelved");
+            lhsInfo->delayedRelevantLess.push_back(info2);
+            propagator().add_undo([lhsInfo]() { lhsInfo->delayedRelevantLess.pop_back(); });
+            return true;
+        }
+        if (rhsInfo != nullptr && rhsInfo->value == undef) {
+            LogN("Shelved");
+            rhsInfo->delayedRelevantLess.push_back(info2);
+            propagator().add_undo([rhsInfo]() { rhsInfo->delayedRelevantLess.pop_back(); });
+            return true;
+        }
+        LogN("Processed");
+
+        try {
+            less(e, info.LHS, info.RHS);
+        }
+        catch (...) {
+            cout << "Crashed less" << endl;
+            exit(133);
+        }
+        return true;
+    }
     assert(info.just.litJust.size() == 1 && info.just.eqJust.empty() && info.just.litJust[0] == e);
 
-    auto* lhsInfo = info.LHS->origin;
-    auto* rhsInfo = info.RHS->origin;
-    assert(!(info.LHS->t->is_ground() && info.RHS->t->is_ground()));
-    assert(!(lhsInfo == nullptr && rhsInfo == nullptr));
+    lhsInfo = info.LHS->origin;
+    rhsInfo = info.RHS->origin;
+    assert(!(info.LHS->t->is_const() && info.RHS->t->is_const()));
+    assert(lhsInfo != nullptr || rhsInfo != nullptr);
 
-    if (lhsInfo != nullptr && lhsInfo->value == unsat) {
-        LogN("Dropped");
-        return false;
-    }
-    if (rhsInfo != nullptr && rhsInfo->value == unsat) {
+    if ((lhsInfo != nullptr && lhsInfo->value == unsat) || (rhsInfo != nullptr && rhsInfo->value == unsat)) {
         LogN("Dropped");
         return false;
     }
@@ -85,7 +113,7 @@ bool complex_adt_solver::asserted(literal e, bool isTrue) {
     LogN("Processed");
 
     try {
-        asserted(e, info.LHS, info.RHS, isTrue);
+        asserted_eq(e, info.LHS, info.RHS, isTrue);
     }
     catch (...) {
         cout << "Crashed unify" << endl;
@@ -94,7 +122,7 @@ bool complex_adt_solver::asserted(literal e, bool isTrue) {
     return true;
 }
 
-bool complex_adt_solver::asserted(literal e, term_instance* lhs, term_instance* rhs, bool isTrue) const {
+bool complex_adt_solver::asserted_eq(literal e, term_instance* lhs, term_instance* rhs, bool isTrue) const {
     assert(&lhs->t->Solver == &rhs->t->Solver);
     if (propagator().is_adt_split()) {
         return isTrue
@@ -120,8 +148,7 @@ bool complex_adt_solver::preprocess_equality(term_instance* lhs, term_instance* 
             if (lhs2->t->FuncID != rhs2->t->FuncID)
                 return false;
             for (unsigned i = 0; i < lhs2->t->Args.size(); i++) {
-                stack.emplace(lhs2->t->Args[i]->get_instance(lhs2->cpy_idx(), propagator()),
-                              rhs2->t->Args[i]->get_instance(rhs2->cpy_idx(), propagator()));
+                stack.emplace(lhs2->get_arg(i, propagator()), rhs2->get_arg(i, propagator()));
             }
         }
         else {
@@ -131,128 +158,33 @@ bool complex_adt_solver::preprocess_equality(term_instance* lhs, term_instance* 
     return true;
 }
 
-bool complex_adt_solver::preprocess_less(term_instance* lhs, term_instance* rhs, bool eq, vector<less_than>& subproblems) {
-    stack<less_than> stack;
-    vector<less_than> comparisons;
-    stack.emplace(lhs, rhs);
+bool complex_adt_solver::preprocess_less(stack<less_than> stack, vector<less_than>& subproblems, bool& eq) {
 
     while (!stack.empty()) {
-        auto [lhs2, rhs2] = stack.top();
+        auto& current = stack.top();
+        auto* lhs = current.LHS;
+        auto* rhs = current.RHS;
         stack.pop();
-        if (lhs2 == rhs2) {
-            if (eq)
-                continue;
-            return false;
-        }
 
-        if (lhs2->t->is_const() && rhs2->t->is_const()) {
-            if (lhs2->t->FuncID != rhs2->t->FuncID)
-                return lhs2->t->FuncID < rhs2->t->FuncID;
-        }
+        if (lhs == rhs)
+            return !subproblems.empty();
 
-        assert((lhs->t->is_var() || rhs->t->is_var()) && lhs != rhs);
-
-        if (lhs2->t->id() == rhs2->t->id() && (lhs2->cpy_idx() == rhs2->cpy_idx() || lhs2->t->is_ground()))
+        if (lhs->t->is_const() && rhs->t->is_const()) {
+            if (lhs->t->FuncID != rhs->t->FuncID) {
+                if (lhs->t->FuncID < rhs->t->FuncID) {
+                    eq = true;
+                    return true;
+                }
+                eq = false;
+                return !subproblems.empty();
+            }
+            for (unsigned i = lhs->t->Args.size(); i > 0; i--) {
+                stack.emplace(lhs->get_arg(i - 1, propagator()), rhs->get_arg(i - 1, propagator()));
+            }
             continue;
-        if (lhs2->t->is_const() && rhs2->t->is_const()) {
-            if (lhs2->t->FuncID != rhs2->t->FuncID)
-                return false;
-            for (unsigned i = 0; i < lhs2->t->Args.size(); i++) {
-                stack.emplace(lhs2->t->Args[i]->get_instance(lhs2->cpy_idx(), propagator()),
-                              rhs2->t->Args[i]->get_instance(rhs2->cpy_idx(), propagator()));
-            }
         }
-        else {
-            subproblems.emplace_back(lhs2, rhs2);
-        }
+        subproblems.emplace_back(lhs, rhs);
     }
-    return true;
-
-    unsigned prevGreaterCnt = r1->greater.size();
-    unsigned prevSmallerCnt = r2->smaller.size();
-
-    justification just1;
-    just1.add_literal(just);
-    justification just2;
-    just2.add_literal(just);
-
-    r1->greater.emplace_back(r2, eq, just1);
-    r2->smaller.emplace_back(r1, eq, just2);
-
-    propagator().add_undo([r1, r2, prevGreaterCnt, prevSmallerCnt]() {
-        r1->greater.pop_back();
-        r2->smaller.pop_back();
-        assert(r1->greater.size() == prevGreaterCnt);
-        assert(r2->smaller.size() == prevSmallerCnt);
-    });
-
-    justification j;
-    j.add_literal(just);
-    vector<term_instance*> path;
-    if (!check(r1, r2, eq, j, path, false))
-        return false;
-    assert(path.empty());
-    assert(j.litJust.size() == 1 && j.eqJust.empty());
-    if (!check(r2, r1, eq, j, path, true))
-        return false;
-
-    if (r1->t->is_const() && r2->t->is_const()) {
-        if (r1->t->FuncID != r2->t->FuncID) {
-            if (r1->t->FuncID < r2->t->FuncID)
-                return true;
-            assert(r1->t->FuncID > r2->t->FuncID);
-            justification justList;
-            justList.add_literal(just);
-            justList.add_equality(lhs, r1);
-            justList.add_equality(rhs, r2);
-            conflict(justList);
-            return false;
-        }
-
-        assert(!r1->t->Args.empty());
-
-        vector<formula> cases;
-        cases.reserve(r1->t->Args.size() + (eq ? 1 : 0));
-
-        for (unsigned i = 0; i < r1->t->Args.size(); i++) {
-            vector<formula> cases2;
-            cases2.reserve(i + 1);
-            for (unsigned j = 0; j < i; j++) {
-                cases2[j] = complexSolver.make_equality_expr(
-                        r1->t->Args[j]->get_instance(r1->cpy_idx(), propagator()),
-                        r2->t->Args[j]->get_instance(r2->cpy_idx(), propagator()));
-            }
-            cases2[i] = complexSolver.make_less_expr(
-                    r1->t->Args[i]->get_instance(r1->cpy_idx(), propagator()),
-                    r2->t->Args[i]->get_instance(r2->cpy_idx(), propagator()));
-            cases[i] = propagator().m.mk_and(cases2);
-        }
-        if (eq) {
-            vector<formula> cases2;
-            cases2.reserve(r1->t->Args.size());
-            for (int i = 0; i < r1->t->Args.size(); i++) {
-                cases2[i] = complexSolver.make_equality_expr(
-                        r1->t->Args[i]->get_instance(r1->cpy_idx(), propagator()),
-                        r2->t->Args[i]->get_instance(r2->cpy_idx(), propagator()));
-            }
-            cases[r1->t->Args.size()] = propagator().m.mk_and(cases2);
-        }
-        justification justList;
-        justList.add_literal(just);
-        justList.add_equality(lhs, r1);
-        justList.add_equality(rhs, r2);
-        propagate(justList, propagator().m.mk_or(cases));
-        return true;
-    }
-    if (r1->t->is_var()) {
-        r1->smaller_watches.emplace_back(lhs, rhs, eq, just);
-        propagator().add_undo([r1]() { r1->smaller_watches.pop_back(); });
-    }
-    else {
-        r2->smaller_watches.emplace_back(lhs, rhs, eq, just);
-        propagator().add_undo([r2]() { r2->smaller_watches.pop_back(); });
-    }
-
     return true;
 }
 
@@ -298,30 +230,61 @@ formula complex_adt_solver::make_disequality_expr(term_instance* lhs, term_insta
     return prop->m.mk_not(make_equality_expr(lhs, Rhs));
 }
 
-literal complex_adt_solver::make_less_expr(term_instance* lhs, term_instance* rhs) {
-    if (lhs->t->id() == rhs->t->id() && (lhs->cpy_idx() == rhs->cpy_idx() || lhs->t->is_ground()))
-        return prop->m.mk_false();
-    if (lhs->t->is_const() == rhs->t->is_const()) {
-        // TODO: Proper preprocessing
-        if (lhs->t->FuncID < rhs->t->FuncID)
-            return prop->m.mk_true();
-        if (lhs->t->FuncID > rhs->t->FuncID)
-            return prop->m.mk_false();
+formula complex_adt_solver::make_less_expr(vector<less_than> subproblems, bool eq) {
+    vector<formula> cases;
+    const unsigned sz = subproblems.size();
+    cases.reserve(sz + (unsigned)eq);
+
+    for (unsigned i = 0; i < sz; i++) {
+        vector<formula> cases2;
+        cases2.reserve(i + 1);
+        for (unsigned j = 0; j < i; j++) {
+            cases2.push_back(make_equality_expr(subproblems[j].LHS, subproblems[j].RHS));
+        }
+
+        formula expr;
+
+        if (!tryGetValue(lessToExpr, subproblems[i], expr)) {
+            expr = prop->m.mk_lit(prop->new_observed_var(OPT(subproblems[i].to_string())));
+            exprToLess.insert(make_pair((literal)expr, subproblems[i]));
+            lessToExpr.insert(make_pair(subproblems[i], expr));
+        }
+
+        cases2.push_back(expr);
+        cases.push_back(propagator().m.mk_and(cases2));
+    }
+    if (eq) {
+        vector<formula> cases2;
+        cases2.reserve(sz);
+        for (int i = 0; i < sz; i++) {
+            cases2.push_back(make_equality_expr(subproblems[i].LHS, subproblems[i].RHS));
+        }
+        cases.push_back(propagator().m.mk_and(cases2));
     }
 
-    less_than le(lhs, rhs);
+    return prop->m.mk_or(cases);
+}
 
-    literal expr = nullptr;
-    if (tryGetValue(lessToExpr, le, expr))
+formula complex_adt_solver::make_less_expr(term_instance* lhs, term_instance* rhs) {
+    less_than lt(lhs, rhs);
+    formula expr = nullptr;
+    if (tryGetValue(lessToExpr, lt, expr))
         return expr;
-    expr = prop->m.mk_lit(prop->new_observed_var(OPT(le.to_string())));
-    exprToLess.insert(make_pair(expr, le));
-    lessToExpr.insert(make_pair(le, expr));
+
+    vector<less_than> subproblems;
+    bool eq = false;
+    if (!preprocess_less(lhs, rhs, subproblems, eq)) {
+        expr = prop->m.mk_false();
+        lessToExpr.insert(make_pair(lt, expr));
+        return expr;
+    }
+    expr = make_less_expr(std::move(subproblems), eq);
+    lessToExpr.insert(make_pair(lt, expr));
     return expr;
 }
 
-literal complex_adt_solver::make_greater_eq_expr(term_instance* lhs, term_instance* rhs) {
-    return prop->m.mk_not(make_less_expr(lhs, rhs));
+formula complex_adt_solver::make_greater_eq_expr(term_instance* lhs, term_instance* rhs) {
+    return propagator().m.mk_not(make_less_eq_expr(rhs, lhs));
 }
 
 void complex_adt_solver::peek_term(const string& solver, const string& name, int argCnt) {
@@ -555,7 +518,7 @@ bool simple_adt_solver::update_ineq(term_instance* newRoot) {
         auto& [inst, eq, just] = newRoot->greater[i];
         justification j(just);
         vector<term_instance*> path;
-        if (!check(newRoot, inst, eq, j, path, false))
+        if (!check_smaller_cycle(newRoot, inst, eq, j, path, false))
             return false;
     }
     cnt = newRoot->smaller.size();
@@ -563,7 +526,7 @@ bool simple_adt_solver::update_ineq(term_instance* newRoot) {
         auto& [inst, eq, just] = newRoot->smaller[i];
         justification j(just);
         vector<term_instance*> path;
-        if (!check(newRoot, inst, eq, j, path, true))
+        if (!check_smaller_cycle(newRoot, inst, eq, j, path, true))
             return false;
     }
     return true;
@@ -703,8 +666,7 @@ bool simple_adt_solver::are_equal(term_instance* lhs, term_instance* rhs) {
         if (r1->t->FuncID != r2->t->FuncID)
             return false;
         for (unsigned i = 0; i < r1->t->Args.size(); i++) {
-            if (!are_equal(r1->t->Args[i]->get_instance(r1->cpy_idx(), propagator()),
-                           r2->t->Args[i]->get_instance(r2->cpy_idx(), propagator())))
+            if (!are_equal(r1->get_arg(i, propagator()), r2->get_arg(i, propagator())))
                 return false;
         }
         return true;
@@ -735,8 +697,7 @@ bool simple_adt_solver::unify(term_instance* lhs, term_instance* rhs, justificat
             return false;
         }
         for (unsigned i = 0; i < r1->t->Args.size(); i++) {
-            if (!unify(r1->t->Args[i]->get_instance(r1->cpy_idx(), propagator()),
-                       r2->t->Args[i]->get_instance(r2->cpy_idx(), propagator()), justifications))
+            if (!unify(r1->get_arg(i, propagator()), r2->get_arg(i, propagator()), justifications))
                 return false;
         }
         justifications.remove_equality();
@@ -781,8 +742,8 @@ z3::check_result simple_adt_solver::non_unify(Lazy* lazy) {
                 lazy->prev.pop();
                 continue;
             }
-            lazy->LHS = current.lhs->t->Args[current.argIdx]->get_instance(current.lhs->cpy_idx(), propagator());
-            lazy->RHS = current.rhs->t->Args[current.argIdx]->get_instance(current.rhs->cpy_idx(), propagator());
+            lazy->LHS = current.lhs->get_arg(current.argIdx, propagator());
+            lazy->RHS = current.rhs->get_arg(current.argIdx, propagator());
             current.argIdx++;
         }
 
@@ -817,8 +778,8 @@ z3::check_result simple_adt_solver::non_unify(Lazy* lazy) {
         lazy->just.add_equality(lazy->RHS, r2);
 
         if (r1->t->Args.size() == 1) {
-            lazy->LHS = r1->t->Args[0]->get_instance(r1->cpy_idx(), propagator());
-            lazy->RHS = r2->t->Args[0]->get_instance(r2->cpy_idx(), propagator());
+            lazy->LHS = r1->get_arg(0, propagator());
+            lazy->RHS = r2->get_arg(0, propagator());
             continue;
         }
 
@@ -833,7 +794,7 @@ z3::check_result simple_adt_solver::non_unify(Lazy* lazy) {
     return z3::check_result::unsat;
 }
 
-bool simple_adt_solver::check_cycle(term_instance* inst, justification& justifications) {
+bool simple_adt_solver::check_containment_cycle(term_instance* inst, justification& justifications) {
     if (!inst->t->is_const() || inst->t->is_ground())
         return true;
     auto* r = inst->find_root(propagator());
@@ -896,14 +857,12 @@ bool simple_adt_solver::non_unify(literal just, term_instance* lhs, term_instanc
     return true;
 }
 
-bool simple_adt_solver::less(literal just, term_instance* lhs, term_instance* rhs, bool eq) {
+bool simple_adt_solver::less(literal just, term_instance* lhs, term_instance* rhs) {
 
     auto* r1 = lhs->find_root(propagator());
     auto* r2 = rhs->find_root(propagator());
 
     if (r1 == r2) {
-        if (eq)
-            return true;
         justification j;
         j.add_literal(just);
         j.add_equality(lhs, rhs);
@@ -919,8 +878,8 @@ bool simple_adt_solver::less(literal just, term_instance* lhs, term_instance* rh
     justification just2;
     just2.add_literal(just);
 
-    r1->greater.emplace_back(r2, eq, just1);
-    r2->smaller.emplace_back(r1, eq, just2);
+    r1->greater.emplace_back(r2, just1);
+    r2->smaller.emplace_back(r1, just2);
 
     propagator().add_undo([r1, r2, prevGreaterCnt, prevSmallerCnt]() {
         r1->greater.pop_back();
@@ -932,11 +891,11 @@ bool simple_adt_solver::less(literal just, term_instance* lhs, term_instance* rh
     justification j;
     j.add_literal(just);
     vector<term_instance*> path;
-    if (!check(r1, r2, eq, j, path, false))
+    if (!check_smaller_cycle(r1, r2, j, path, false))
         return false;
     assert(path.empty());
     assert(j.litJust.size() == 1 && j.eqJust.empty());
-    if (!check(r2, r1, eq, j, path, true))
+    if (!check_smaller_cycle(r2, r1, j, path, true))
         return false;
 
     if (r1->t->is_const() && r2->t->is_const()) {
@@ -961,22 +920,16 @@ bool simple_adt_solver::less(literal just, term_instance* lhs, term_instance* rh
             vector<formula> cases2;
             cases2.reserve(i + 1);
             for (unsigned j = 0; j < i; j++) {
-                cases2[j] = complexSolver.make_equality_expr(
-                        r1->t->Args[j]->get_instance(r1->cpy_idx(), propagator()),
-                        r2->t->Args[j]->get_instance(r2->cpy_idx(), propagator()));
+                cases2[j] = complexSolver.make_equality_expr(r1->get_arg(j, propagator()), r2->get_arg(j, propagator()));
             }
-            cases2[i] = complexSolver.make_less_expr(
-                    r1->t->Args[i]->get_instance(r1->cpy_idx(), propagator()),
-                    r2->t->Args[i]->get_instance(r2->cpy_idx(), propagator()));
+            cases2[i] = complexSolver.make_less_expr(r1->get_arg(i, propagator()), r2->get_arg(i, propagator()));
             cases[i] = propagator().m.mk_and(cases2);
         }
         if (eq) {
             vector<formula> cases2;
             cases2.reserve(r1->t->Args.size());
             for (int i = 0; i < r1->t->Args.size(); i++) {
-                cases2[i] = complexSolver.make_equality_expr(
-                        r1->t->Args[i]->get_instance(r1->cpy_idx(), propagator()),
-                        r2->t->Args[i]->get_instance(r2->cpy_idx(), propagator()));
+                cases2[i] = complexSolver.make_equality_expr(r1->get_arg(i, propagator()), r2->get_arg(i, propagator()));
             }
             cases[r1->t->Args.size()] = propagator().m.mk_and(cases2);
         }
@@ -999,34 +952,25 @@ bool simple_adt_solver::less(literal just, term_instance* lhs, term_instance* rh
     return true;
 }
 
-bool simple_adt_solver::check(term_instance* start, term_instance* current, bool eq, justification& just,
-                              vector<term_instance*>& path, bool smaller) {
+bool simple_adt_solver::check_smaller_cycle(term_instance* start, term_instance* current, justification& just, vector<term_instance*>& path, bool smaller) {
     term_instance* r1 = start->find_root(propagator());
     term_instance* r2 = current->find_root(propagator());
     if (r1 == r2) {
-        if (eq) {
-            for (auto* p : path) {
-                equality equality(start, p, { just });
-                merge_root(start, p, equality, false);
-            }
-            return true;
-        }
         conflict(just);
         return false;
     }
     just.add_equality(start, r1);
     just.add_equality(current, r2);
-    if (start->t->is_const() && r2->t->is_const() && r1->t->FuncID != r2->t->FuncID &&
-        smaller == (r1->t->FuncID < r2->t->FuncID)) {
+    if (start->t->is_const() && r2->t->is_const() && r1->t->FuncID != r2->t->FuncID && smaller == (r1->t->FuncID < r2->t->FuncID)) {
         conflict(just);
         return false;
     }
-    if (eq)
-        path.push_back(current);
 
     unsigned cnt = smaller ? r2->smaller.size() : r2->greater.size();
+    auto& children = smaller ? r2->smaller : r2->greater;
+
     for (auto i = 0; i < cnt; i++) {
-        auto& [inst, b, justifications] = (smaller ? r2->smaller : r2->greater)[i];
+        auto& [inst, justifications] = children[i];
 
         if (inst->find_root(propagator()) == r2) {
             assert(b);
@@ -1036,14 +980,11 @@ bool simple_adt_solver::check(term_instance* start, term_instance* current, bool
         unsigned prevLit = just.litJust.size();
         unsigned prevEq = just.eqJust.size();
         just.add(justifications);
-        if (!check(r1, inst, eq && b, just, path, smaller))
+        if (!check_smaller_cycle(r1, inst, just, path, smaller))
             return false;
         just.litJust.resize(prevLit);
         just.eqJust.resize(prevEq);
     }
-
-    if (eq)
-        path.pop_back();
 
     just.remove_equality();
     just.remove_equality();
@@ -1062,10 +1003,10 @@ bool simple_adt_solver::add_root(term_instance* b, term_instance* newRoot, bool 
     newRoot->cnt += b->cnt;
 
     justification just;
-    if (!check_cycle(newRoot, just))
+    if (!check_containment_cycle(newRoot, just))
         return false;
     assert(just.empty());
-    if (b->t->is_const() && !check_cycle(b, just))
+    if (b->t->is_const() && !check_containment_cycle(b, just))
         // Required for eg. x = f(a), x = f(x) <- the second would be immediately merged and we would only check f(a) for a cycle
         return false;
 
@@ -1116,7 +1057,7 @@ bool simple_adt_solver::add_root(term_instance* b, term_instance* newRoot, bool 
     // Don't use foreach - we might change the vector
     for (int i = 0; i < newRoot->smaller_watches.size(); i++) {
         auto [lhs, rhs, eq, just2] = newRoot->smaller_watches[i];
-        less(just2, lhs, rhs, eq);
+        less(just2, lhs, rhs);
     }
     return true;
 }
