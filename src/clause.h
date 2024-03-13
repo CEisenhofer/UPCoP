@@ -20,7 +20,7 @@ struct clause {
     clause(const clause& c1, const clause& c2);
 
     inline void AddVariables(const z3::expr_vector& exprs) {
-        for (const auto& e: exprs) {
+        for (const auto& e : exprs) {
             containedVars.insert(e);
         }
     }
@@ -42,7 +42,7 @@ namespace std {
         size_t operator()(const clause& c) const {
             std::hash<fo_literal> hash;
             size_t idx = 17;
-            for (const auto& x: c.literals) {
+            for (const auto& x : c.literals) {
                 idx ^= ~hash(x);
                 idx *= 13;
             }
@@ -64,8 +64,9 @@ struct TautologyHint {
 
 struct indexed_clause {
     const vector<indexed_literal*> literals;
+    const vector<term*> variables;
     const unsigned Index;
-    bool Ground;
+    const bool Ground;
     bool Conjecture = false;
 
     unsigned size() const { return literals.size(); }
@@ -82,7 +83,7 @@ struct indexed_clause {
 
     indexed_clause& operator=(const indexed_clause&) = delete;
 
-    indexed_clause(unsigned index, const vector<indexed_literal*>& literals);
+    indexed_clause(unsigned index, vector<indexed_literal*> literals, vector<term*> variables);
 
     bool operator==(const indexed_clause& c) const {
         assert((Index == c.Index) == (this == &c));

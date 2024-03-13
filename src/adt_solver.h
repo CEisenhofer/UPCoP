@@ -50,6 +50,7 @@ public:
     bool asserted(literal e, term_instance* lhs, term_instance* rhs, bool isTrue) const;
 
     bool preprocess_equality(term_instance* lhs, term_instance* rhs, vector<equality>& subproblems);
+    bool preprocess_less(term_instance* lhs, term_instance* rhs, vector<pair<term_instance*, term_instance*>>& subproblems);
 
     formula make_equality_expr(term_instance* lhs, term_instance* rhs);
     formula make_disequality_expr(term_instance* lhs, term_instance* Rhs);

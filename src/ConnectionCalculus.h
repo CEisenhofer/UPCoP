@@ -52,6 +52,6 @@ cnf<clause> to_cnf(z3::context& ctx, const z3::expr& input, bool polarity, z3::e
 void CollectTerm(const z3::expr& expr, unordered_set<optional<z3::func_decl>>& language,
                  std::unordered_set<unsigned>& visited);
 
-term* SubstituteTerm(const z3::expr& expr,
-                     const unordered_map<z3::func_decl, term_abstraction>& termAbstraction,
-                     const unordered_map<z3::func_decl, variable_abstraction>& varAbstraction);
+term* substitute_term(const z3::expr& expr,
+                      const unordered_map<z3::func_decl, term_abstraction>& termAbstraction,
+                      const unordered_map<z3::func_decl, variable_abstraction>& varAbstraction);

@@ -4,7 +4,7 @@ static unsigned conflicts = 0;
 static unsigned cnt = 0;
 
 complex_adt_solver::~complex_adt_solver() {
-    for (auto& solver: solvers) {
+    for (auto& solver : solvers) {
         delete solver;
     }
 }
@@ -120,13 +120,140 @@ bool complex_adt_solver::preprocess_equality(term_instance* lhs, term_instance* 
             if (lhs2->t->FuncID != rhs2->t->FuncID)
                 return false;
             for (unsigned i = 0; i < lhs2->t->Args.size(); i++) {
-                stack.emplace(lhs2->t->Args[i]->get_instance(lhs2->cpy_idx(), propagator()), rhs2->t->Args[i]->get_instance(rhs2->cpy_idx(), propagator()));
+                stack.emplace(lhs2->t->Args[i]->get_instance(lhs2->cpy_idx(), propagator()),
+                              rhs2->t->Args[i]->get_instance(rhs2->cpy_idx(), propagator()));
             }
         }
         else {
             subproblems.emplace_back(lhs2, rhs2);
         }
     }
+    return true;
+}
+
+bool
+complex_adt_solver::preprocess_less(term_instance* lhs, term_instance* rhs, bool eq, vector<less_than>& subproblems) {
+    stack<less_than> stack;
+    vector<less_than> comparisons;
+    stack.emplace(lhs, rhs);
+
+    while (!stack.empty()) {
+        auto [lhs2, rhs2] = stack.top();
+        stack.pop();
+        if (lhs2 == rhs2) {
+            if (eq)
+                continue;
+            return false;
+        }
+
+        if (lhs2->t->is_const() && rhs2->t->is_const()) {
+            if (lhs2->t->FuncID != rhs2->t->FuncID)
+                return lhs2->t->FuncID < rhs2->t->FuncID;
+        }
+
+        assert((lhs->t->is_var() || rhs->t->is_var()) && lhs != rhs);
+
+        if (lhs2->t->id() == rhs2->t->id() && (lhs2->cpy_idx() == rhs2->cpy_idx() || lhs2->t->is_ground()))
+            continue;
+        if (lhs2->t->is_const() && rhs2->t->is_const()) {
+            if (lhs2->t->FuncID != rhs2->t->FuncID)
+                return false;
+            for (unsigned i = 0; i < lhs2->t->Args.size(); i++) {
+                stack.emplace(lhs2->t->Args[i]->get_instance(lhs2->cpy_idx(), propagator()),
+                              rhs2->t->Args[i]->get_instance(rhs2->cpy_idx(), propagator()));
+            }
+        }
+        else {
+            subproblems.emplace_back(lhs2, rhs2);
+        }
+    }
+    return true;
+
+    unsigned prevGreaterCnt = r1->greater.size();
+    unsigned prevSmallerCnt = r2->smaller.size();
+
+    justification just1;
+    just1.add_literal(just);
+    justification just2;
+    just2.add_literal(just);
+
+    r1->greater.emplace_back(r2, eq, just1);
+    r2->smaller.emplace_back(r1, eq, just2);
+
+    propagator().add_undo([r1, r2, prevGreaterCnt, prevSmallerCnt]() {
+        r1->greater.pop_back();
+        r2->smaller.pop_back();
+        assert(r1->greater.size() == prevGreaterCnt);
+        assert(r2->smaller.size() == prevSmallerCnt);
+    });
+
+    justification j;
+    j.add_literal(just);
+    vector<term_instance*> path;
+    if (!check(r1, r2, eq, j, path, false))
+        return false;
+    assert(path.empty());
+    assert(j.litJust.size() == 1 && j.eqJust.empty());
+    if (!check(r2, r1, eq, j, path, true))
+        return false;
+
+    if (r1->t->is_const() && r2->t->is_const()) {
+        if (r1->t->FuncID != r2->t->FuncID) {
+            if (r1->t->FuncID < r2->t->FuncID)
+                return true;
+            assert(r1->t->FuncID > r2->t->FuncID);
+            justification justList;
+            justList.add_literal(just);
+            justList.add_equality(lhs, r1);
+            justList.add_equality(rhs, r2);
+            conflict(justList);
+            return false;
+        }
+
+        assert(!r1->t->Args.empty());
+
+        vector<formula> cases;
+        cases.reserve(r1->t->Args.size() + (eq ? 1 : 0));
+
+        for (unsigned i = 0; i < r1->t->Args.size(); i++) {
+            vector<formula> cases2;
+            cases2.reserve(i + 1);
+            for (unsigned j = 0; j < i; j++) {
+                cases2[j] = complexSolver.make_equality_expr(
+                        r1->t->Args[j]->get_instance(r1->cpy_idx(), propagator()),
+                        r2->t->Args[j]->get_instance(r2->cpy_idx(), propagator()));
+            }
+            cases2[i] = complexSolver.make_less_expr(
+                    r1->t->Args[i]->get_instance(r1->cpy_idx(), propagator()),
+                    r2->t->Args[i]->get_instance(r2->cpy_idx(), propagator()));
+            cases[i] = propagator().m.mk_and(cases2);
+        }
+        if (eq) {
+            vector<formula> cases2;
+            cases2.reserve(r1->t->Args.size());
+            for (int i = 0; i < r1->t->Args.size(); i++) {
+                cases2[i] = complexSolver.make_equality_expr(
+                        r1->t->Args[i]->get_instance(r1->cpy_idx(), propagator()),
+                        r2->t->Args[i]->get_instance(r2->cpy_idx(), propagator()));
+            }
+            cases[r1->t->Args.size()] = propagator().m.mk_and(cases2);
+        }
+        justification justList;
+        justList.add_literal(just);
+        justList.add_equality(lhs, r1);
+        justList.add_equality(rhs, r2);
+        propagate(justList, propagator().m.mk_or(cases));
+        return true;
+    }
+    if (r1->t->is_var()) {
+        r1->smaller_watches.emplace_back(lhs, rhs, eq, just);
+        propagator().add_undo([r1]() { r1->smaller_watches.pop_back(); });
+    }
+    else {
+        r2->smaller_watches.emplace_back(lhs, rhs, eq, just);
+        propagator().add_undo([r2]() { r2->smaller_watches.pop_back(); });
+    }
+
     return true;
 }
 
@@ -148,7 +275,7 @@ formula complex_adt_solver::make_equality_expr(term_instance* lhs, term_instance
     vector<literal> cases2;
     cases.reserve(subproblems.size());
 
-    for (auto eq2: subproblems) {
+    for (auto eq2 : subproblems) {
         if (!tryGetValue(eqToExpr, eq2, expr)) {
             expr = prop->m.mk_lit(prop->new_observed_var(OPT(eq2.to_string())));
             eq2.just.add_literal((literal)expr);
@@ -298,8 +425,8 @@ void complex_adt_solver::make_z3_adt(z3::context& ctx) {
         solvers[i]->z3Sort = z3::sort(ctx, n_res[i]);
     }
 
-    for (auto& list: constructors) {
-        for (auto* c: list) {
+    for (auto& list : constructors) {
+        for (auto* c : list) {
             Z3_del_constructor(ctx, c);
         }
     }
@@ -309,7 +436,7 @@ void complex_adt_solver::make_z3_adt(z3::context& ctx) {
 }
 
 simple_adt_solver::~simple_adt_solver() {
-    for (auto& list: hashCon) {
+    for (auto& list : hashCon) {
         delete list.second;
     }
     if (z3Sort.has_value())
@@ -324,7 +451,8 @@ string simple_adt_solver::pretty_print(const term* t, unsigned cpyIdx,
         string name;
         if (tryGetValue(*prettyNames, t->get_instance(cpyIdx, propagator()), name))
             return name;
-        prettyNames->insert(make_pair(t->get_instance(cpyIdx, propagator()), name = "$" + std::to_string(prettyNames->size())));
+        prettyNames->insert(
+                make_pair(t->get_instance(cpyIdx, propagator()), name = "$" + std::to_string(prettyNames->size())));
         return name;
     }
 
@@ -348,7 +476,7 @@ int simple_adt_solver::peek_term(const string& name, unsigned argCnt) {
 int simple_adt_solver::peek_term(const string& name, vector<unsigned> domain) {
     int id = 0;
     if (!tryGetValue(nameToId, name, id)) {
-        id = (int) funcNames.size();
+        id = (int)funcNames.size();
         domains.push_back(std::move(domain));
         funcNames.push_back(name);
         nameToId.insert(make_pair(name, id));
@@ -381,7 +509,7 @@ term* simple_adt_solver::make_term_internal(int id, const vector<term*>& args, c
 term* simple_adt_solver::make_var(const string& name, const indexed_clause* clause) {
     int id = 0;
     if (!tryGetValue(nameToId, name, id)) {
-        id = -((int) varNames.size() + 1);
+        id = -((int)varNames.size() + 1);
         varNames.push_back(name);
         nameToId.insert(make_pair(name, id));
     }
@@ -398,7 +526,7 @@ term* simple_adt_solver::make_var(int idx, const indexed_clause* clause) {
 
 bool simple_adt_solver::update_diseq(term_instance* b, term_instance* newRoot) {
     assert(b->find_root(propagator()) == newRoot);
-    for (auto& info: newRoot->diseq_watches) {
+    for (auto& info : newRoot->diseq_watches) {
         if (non_unify(info) == z3::check_result::unsat)
             // TODO: Swap remove if sat
             return false;
@@ -409,7 +537,7 @@ bool simple_adt_solver::update_diseq(term_instance* b, term_instance* newRoot) {
         newRoot->diseq_watches.resize(prevSize);
     });
 
-    for (auto& info: b->diseq_watches) {
+    for (auto& info : b->diseq_watches) {
         switch (non_unify(info)) {
             case z3::check_result::unsat:
                 return false;
@@ -576,7 +704,8 @@ bool simple_adt_solver::are_equal(term_instance* lhs, term_instance* rhs) {
         if (r1->t->FuncID != r2->t->FuncID)
             return false;
         for (unsigned i = 0; i < r1->t->Args.size(); i++) {
-            if (!are_equal(r1->t->Args[i]->get_instance(r1->cpy_idx(), propagator()), r2->t->Args[i]->get_instance(r2->cpy_idx(), propagator())))
+            if (!are_equal(r1->t->Args[i]->get_instance(r1->cpy_idx(), propagator()),
+                           r2->t->Args[i]->get_instance(r2->cpy_idx(), propagator())))
                 return false;
         }
         return true;
@@ -607,7 +736,8 @@ bool simple_adt_solver::unify(term_instance* lhs, term_instance* rhs, justificat
             return false;
         }
         for (unsigned i = 0; i < r1->t->Args.size(); i++) {
-            if (!unify(r1->t->Args[i]->get_instance(r1->cpy_idx(), propagator()), r2->t->Args[i]->get_instance(r2->cpy_idx(), propagator()), justifications))
+            if (!unify(r1->t->Args[i]->get_instance(r1->cpy_idx(), propagator()),
+                       r2->t->Args[i]->get_instance(r2->cpy_idx(), propagator()), justifications))
                 return false;
         }
         justifications.remove_equality();
@@ -615,7 +745,7 @@ bool simple_adt_solver::unify(term_instance* lhs, term_instance* rhs, justificat
         return true;
     }
 
-    if (merge_root(r1, r2, { lhs, rhs, { justifications } })) {
+    if (merge_root(r1, r2, { lhs, rhs, { justifications }})) {
         justifications.remove_equality();
         justifications.remove_equality();
         return true;
@@ -709,7 +839,7 @@ bool simple_adt_solver::check_cycle(term_instance* inst, justification& justific
         return true;
     auto* r = inst->find_root(propagator());
     justifications.add_equality(inst, r);
-    for (auto* arg: inst->t->Args) {
+    for (auto* arg : inst->t->Args) {
         if (!check_cycle(arg->get_instance(inst->cpy_idx(), propagator()), r, justifications))
             return false;
     }
@@ -732,7 +862,7 @@ bool simple_adt_solver::check_cycle(term_instance* inst, term_instance* search, 
         return true;
 
     justifications.add_equality(inst, r);
-    for (auto* arg: r->t->Args) {
+    for (auto* arg : r->t->Args) {
         if (!check_cycle(arg->get_instance(r->cpy_idx(), propagator()), search, justifications))
             return false;
     }
@@ -876,7 +1006,7 @@ bool simple_adt_solver::check(term_instance* start, term_instance* current, bool
     term_instance* r2 = current->find_root(propagator());
     if (r1 == r2) {
         if (eq) {
-            for (auto* p: path) {
+            for (auto* p : path) {
                 equality equality(start, p, { just });
                 merge_root(start, p, equality, false);
             }
@@ -1034,7 +1164,7 @@ void simple_adt_solver::find_just(term_instance* n1, term_instance* n2, justific
     std::unordered_map<term_instance*, equality> prev;
     prev.reserve(n1->actual_connections.size());
 
-    for (auto& c: n1->actual_connections) {
+    for (auto& c : n1->actual_connections) {
         auto* to = c.GetOther(n1);
         if (n2 == to) {
             minimalJust.add(c.just);
@@ -1058,7 +1188,7 @@ void simple_adt_solver::find_just(term_instance* n1, term_instance* n2, justific
             }
             return;
         }
-        for (auto& equality: to->actual_connections) {
+        for (auto& equality : to->actual_connections) {
             auto* next = equality.GetOther(to);
             todo.emplace_back(to, next, equality);
         }

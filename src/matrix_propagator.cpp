@@ -1,6 +1,7 @@
 ﻿#include "matrix_propagator.h"
 
-matrix_propagator::matrix_propagator(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt) :
+matrix_propagator::matrix_propagator(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver,
+                                     ProgParams& progParams, unsigned literalCnt) :
         propagator_base(cnf, adtSolver, progParams, literalCnt), lvl(progParams.Depth) {
 
     assert(progParams.Mode == Rectangle || progParams.Mode == Core);
@@ -116,13 +117,13 @@ bool matrix_propagator::next_level_core() {
     }
     LogN("");
 
-    for (unsigned c: required) {
+    for (unsigned c : required) {
         progParams.priority[c]++;
     }
 
     unsigned maxVar = 1;
     unsigned maxValue = 0;
-    for (unsigned v: required) {
+    for (unsigned v : required) {
         if (progParams.priority[v] > maxValue) {
             maxVar = v;
             maxValue = progParams.priority[v];
@@ -171,10 +172,10 @@ void matrix_propagator::check_proof(z3::context& ctx) {
         vector<term_instance*> terms;
         z3::expr_vector literal(ctx);
 
-        for (ground_literal l: c->literals) {
+        for (ground_literal l : c->literals) {
             z3::expr_vector args(ctx);
             z3::sort_vector argSorts(ctx);
-            for (term* t: l.lit->arg_bases) {
+            for (term* t : l.lit->arg_bases) {
                 term_instance* inst = t->get_instance(l.copyIdx, *this);
                 terms.push_back(inst);
                 args.push_back(inst->to_z3(*this, ctx, lookup));
@@ -188,7 +189,7 @@ void matrix_propagator::check_proof(z3::context& ctx) {
 
         clauses.push_back(mk_or(literal));
 
-        for (auto* inst: terms) {
+        for (auto* inst : terms) {
             if (inst->is_root())
                 continue;
             z3Solver.add(inst->to_z3(*this, ctx, lookup) == inst->find_root(*this)->to_z3(*this, ctx, lookup));
@@ -236,7 +237,8 @@ clause_instance* matrix_propagator::get_ground(const indexed_clause* clause, uns
 }
 
 void matrix_propagator::assert_root() {
-    assert(std::any_of(matrix.clauses.begin(), matrix.clauses.end(), [](const indexed_clause* c) { return c->Conjecture; }));
+    assert(std::any_of(matrix.clauses.begin(), matrix.clauses.end(),
+                       [](const indexed_clause* c) { return c->Conjecture; }));
     for (unsigned i = 0; i < matrix.size(); i++) {
         if (matrix[i]->Conjecture) {
             int lit = get_ground(matrix[i], 0)->selector->get_lit();
@@ -273,14 +275,14 @@ void matrix_propagator::pb_clause_limit() {
         just.reserve(chosen.size());
         prop.reserve(allClauses.size() - (chosen.size() + not_chosen.size()));
 
-        for (auto* clause: allClauses) {
+        for (auto* clause : allClauses) {
             if (clause->value == sat)
                 just.push_back(clause->selector);
             else if (clause->value == undef)
                 prop.push_back(m.mk_not(clause->selector));
         }
 
-        for (auto* p: prop) {
+        for (auto* p : prop) {
             if (!soft_propagate(just, p))
                 return;
         }
@@ -294,14 +296,14 @@ void matrix_propagator::pb_clause_limit() {
         just.reserve(not_chosen.size());
         prop.reserve(allClauses.size() - (chosen.size() + not_chosen.size()));
 
-        for (auto* clause: allClauses) {
+        for (auto* clause : allClauses) {
             if (clause->value == unsat)
                 just.push_back(m.mk_not(clause->selector));
             else if (clause->value == undef)
                 prop.push_back(clause->selector);
         }
 
-        for (auto* p: prop) {
+        for (auto* p : prop) {
             if (!soft_propagate(just, p))
                 return;
         }
@@ -353,9 +355,31 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
         if (info->copyIdx > 0) {
             auto val = cachedClauses[c][info->copyIdx - 1]->value;
             if (val != sat) {
-                if (!soft_propagate({e}, get_ground(info->clause, info->copyIdx - 1)->selector))
+                if (!soft_propagate({ e }, get_ground(info->clause, info->copyIdx - 1)->selector))
                     return;
             }
+#ifndef PUSH_POP
+            if (!info->propagated) {
+#endif
+                vector<formula> smaller;
+                for (unsigned i = 0; i < info->clause->variables.size(); i++) {
+                    term* t1 = info->clause->variables[i];
+                    term_instance* inst1 = t1->get_instance(info->copyIdx, *this);
+                    term_instance* inst2 = t1->get_instance(info->copyIdx - 1, *this);
+                    vector<formula> cases;
+                    for (unsigned j = 0; j < i; j++) {
+                        term* t2 = info->clause->variables[j];
+                        term_instance* jnst1 = t2->get_instance(info->copyIdx, *this);
+                        term_instance* jnst2 = t2->get_instance(info->copyIdx - 1, *this);
+                        cases.push_back(term_solver.make_equality_expr(jnst1, jnst2));
+                    }
+                    cases.push_back(term_solver.make_less_expr(inst1, inst2));
+                    smaller.push_back(m.mk_and(cases));
+                }
+                hard_propagate({ e }, m.mk_or(smaller));
+#ifndef PUSH_POP
+            }
+#endif
         }
 
         info->value = sat;
@@ -419,7 +443,7 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
                         // clause->TautologyConstraints->emplace_back(k, l, diseq);
 
                         formula neq = diseq->GetNegConstraints(*this, info->literals[k], info->literals[l]);
-                        hard_propagate({e}, neq);
+                        hard_propagate({ e }, neq);
                         delete diseq;
                     }
                 }
@@ -509,7 +533,7 @@ void matrix_propagator::final() {
     assert(!chosen.empty());
     if (progParams.Mode == Rectangle && chosen.size() != lvl) {
         if (chosen.size() < lvl) {
-            for (auto* clause: allClauses) {
+            for (auto* clause : allClauses) {
                 if (clause->value == undef) {
                     std::cout << "Unassigned: " << clause->clause->Index << "#" << clause->copyIdx << std::endl;
                 }
@@ -527,8 +551,11 @@ void matrix_propagator::final() {
                     return true;
                 return false;
             });
-            for (auto* clause: chosen) {
-                std::cout << "Chose [" << (clause->value == tri_state::sat ? "sat" : clause->value == tri_state::unsat ? "unsat" : "unknown") << "]: " << clause->clause->Index << "#" << clause->copyIdx << std::endl;
+            for (auto* clause : chosen) {
+                std::cout << "Chose ["
+                          << (clause->value == tri_state::sat ? "sat" : clause->value == tri_state::unsat ? "unsat"
+                                                                                                          : "unknown")
+                          << "]: " << clause->clause->Index << "#" << clause->copyIdx << std::endl;
             }
         }
         assert(false);
@@ -574,10 +601,10 @@ void matrix_propagator::final() {
         }
 
         if (progParams.Mode == Core) {
-            for (auto elem: path) {
+            for (auto elem : path) {
                 for (unsigned i = 0; i < matrix.size(); i++) {
                     indexed_clause* cl = matrix[i];
-                    unsigned literalCnt =cl ->literals.size();
+                    unsigned literalCnt = cl->literals.size();
                     for (int j = 0; j < literalCnt; j++) {
                         cache_unification(elem.lit, *(cl->literals[j]));
                         const subterm_hint* unification = unificationHints.get(
@@ -598,7 +625,7 @@ void matrix_propagator::final() {
                             constraints.push_back(m.mk_not(clauseLimitListExpr[i]));
                         }
                         else {
-                            vector<formula> cnstr = {cachedClause[maxId]->selector };
+                            vector<formula> cnstr = { cachedClause[maxId]->selector };
                             unification->GetPosConstraints(*this, elem.lit, cachedClause[maxId]->literals[j], cnstr);
                             cnstr.push_back(m.mk_and(cnstr));
                         }

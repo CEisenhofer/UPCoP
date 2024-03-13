@@ -18,8 +18,8 @@ clause::clause(const clause& c1, const clause& c2) {
         containedVars.insert(c);
 }
 
-indexed_clause::indexed_clause(unsigned index, const vector<indexed_literal*>& literals) :
-        literals(literals), Index(index), Ground(
+indexed_clause::indexed_clause(unsigned index, vector<indexed_literal*> literals, vector<term*> variables) :
+        literals(std::move(literals)), variables(std::move(variables)), Index(index), Ground(
         all_of(literals.cbegin(), literals.cend(),
                [](const indexed_literal* o1) {
                     return all_of(o1->arg_bases.cbegin(), o1->arg_bases.cend(), [](const auto& o2) { return o2->is_ground(); });
