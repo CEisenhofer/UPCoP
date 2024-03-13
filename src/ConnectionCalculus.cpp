@@ -277,7 +277,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         adtSolver.make_z3_adt(context);
 
     int timeLeft = progParams.Timeout == 0 ? INT_MAX : progParams.Timeout;
-    auto* propagator = new matrix_propagator(cnf, adtSolver, progParams, literalCnt);
+    auto* propagator = new matrix_propagator(cnf, adtSolver, progParams, literalCnt, (unsigned)timeLeft);
 
     for (unsigned id = progParams.Depth; id < progParams.MaxDepth; id++) {
         start_watch();
@@ -333,7 +333,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
                 return sat;
             }
             delete propagator;
-            propagator = new matrix_propagator(cnf, adtSolver, progParams, literalCnt);
+            propagator = new matrix_propagator(cnf, adtSolver, progParams, literalCnt, timeLeft);
             continue;
         }
 

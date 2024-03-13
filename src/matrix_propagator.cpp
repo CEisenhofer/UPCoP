@@ -1,8 +1,7 @@
 ﻿#include "matrix_propagator.h"
 
-matrix_propagator::matrix_propagator(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver,
-                                     ProgParams& progParams, unsigned literalCnt) :
-        propagator_base(cnf, adtSolver, progParams, literalCnt), lvl(progParams.Depth) {
+matrix_propagator::matrix_propagator(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt, unsigned timeLeft) :
+        propagator_base(cnf, adtSolver, progParams, literalCnt, timeLeft), lvl(progParams.Depth) {
 
     assert(progParams.Mode == Rectangle || progParams.Mode == Core);
 

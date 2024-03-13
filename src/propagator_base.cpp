@@ -8,8 +8,8 @@ unsigned propagator_base::getRandom(unsigned min, unsigned max) const {
     return min + res % span;
 }
 
-propagator_base::propagator_base(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt)
-    : CaDiCal_propagator(), term_solver(adtSolver), generator(0), progParams(progParams), matrix(cnf), unificationHints(literalCnt) {
+propagator_base::propagator_base(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt, unsigned timeLeft)
+    : CaDiCal_propagator(timeLeft), term_solver(adtSolver), generator(0), progParams(progParams), matrix(cnf), unificationHints(literalCnt) {
 
 #ifdef DIMACS
     dimacs << "c depth " << progParams.Depth << '\n';

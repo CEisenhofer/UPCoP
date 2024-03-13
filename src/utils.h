@@ -2,8 +2,8 @@
 
 // #define PUSH_POP
 
-#include <optional>
 #include <algorithm>
+#include <optional>
 #include <sstream>
 #include <unordered_set>
 #include "z3++.h"

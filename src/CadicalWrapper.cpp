@@ -1,4 +1,5 @@
 #include "CadicalWrapper.h"
+#include <chrono>
 
 #ifndef NDEBUG
 std::unordered_map<unsigned, std::string> names;
@@ -200,14 +201,30 @@ bool CaDiCal_propagator::soft_propagate(const std::vector<literal>& just, litera
     return true;
 }
 
-void CaDiCal_propagator::init_solver() {
-    solver = new CaDiCaL::Solver();
+class timeout_terminator : public CaDiCaL::Terminator {
+    decltype(std::chrono::high_resolution_clock::now()) stopTime;
+
+public:
+    explicit timeout_terminator(unsigned timeLeft) : stopTime(std::chrono::milliseconds(timeLeft) + std::chrono::high_resolution_clock::now()) { }
+
+    bool terminate() override {
+        return std::chrono::high_resolution_clock::now() >= stopTime;
+    }
+};
+
+CaDiCal_propagator::CaDiCal_propagator(unsigned timeLeft) : m(this), solver(new CaDiCaL::Solver()), terminator(new timeout_terminator(timeLeft)) {
     solver->set("ilb", 0);
     solver->set("ilbassumptions", 0);
     solver->set("chrono", 0);
     // solver->set("phase", 0);
+    solver->connect_terminator(terminator);
     solver->connect_external_propagator(this);
     reset_names();
+}
+
+CaDiCal_propagator::~CaDiCal_propagator() {
+    delete solver;
+    delete terminator;
 }
 
 void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
@@ -253,7 +270,7 @@ void CaDiCal_propagator::notify_new_decision_level() {
 void CaDiCal_propagator::notify_backtrack(size_t new_level) {
     assert(decision_level == undo_stack_limit.size());
     if (new_level >= undo_stack_limit.size()) {
-        std::cout << "WTF: " << undo_stack_limit.size() << " -> " << new_level << std::endl;
+        // std::cout << "WTF: " << undo_stack_limit.size() << " -> " << new_level << std::endl;
         assert(undo_stack_limit.empty());
         // TODO: WTF?! CaDiCal went crazy
         //undo_stack_limit.resize(new_level);

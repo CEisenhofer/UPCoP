@@ -56,7 +56,7 @@ class matrix_propagator : public propagator_base {
     bool pbPropagated = false;
 
 public:
-    matrix_propagator(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt);
+    matrix_propagator(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt, unsigned timeLeft);
 
     ~matrix_propagator() override {
         for (auto& clause : allClauses) {

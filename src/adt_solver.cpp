@@ -131,8 +131,7 @@ bool complex_adt_solver::preprocess_equality(term_instance* lhs, term_instance* 
     return true;
 }
 
-bool
-complex_adt_solver::preprocess_less(term_instance* lhs, term_instance* rhs, bool eq, vector<less_than>& subproblems) {
+bool complex_adt_solver::preprocess_less(term_instance* lhs, term_instance* rhs, bool eq, vector<less_than>& subproblems) {
     stack<less_than> stack;
     vector<less_than> comparisons;
     stack.emplace(lhs, rhs);

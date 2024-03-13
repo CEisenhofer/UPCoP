@@ -106,7 +106,7 @@ public:
         return progParams.SATSplit;
     }
 
-    propagator_base(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt);
+    propagator_base(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt, unsigned timeLeft);
 
     large_array unificationHints;
 
