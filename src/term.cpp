@@ -90,8 +90,6 @@ string position::to_string() const {
 }
 
 string less_than::to_string() const {
-    if (eq)
-        return LHS->to_string() + " <= " + RHS->to_string();
     return LHS->to_string() + " < " + RHS->to_string();
 }
 #endif
@@ -107,9 +105,23 @@ equality::equality(term_instance* lhs, term_instance* rhs, justification just) :
     }
 }
 
+disequality::disequality(term_instance* lhs, term_instance* rhs, literal just) : just(just) {
+    if (lhs->compare_to(rhs) <= 0) {
+        LHS = lhs;
+        RHS = rhs;
+    }
+    else {
+        LHS = rhs;
+        RHS = lhs;
+    }
+}
+
 #ifndef NDEBUG
 string equality::to_string() const {
     return LHS->to_string() + " == " + RHS->to_string();
+}
+string disequality::to_string() const {
+    return LHS->to_string() + " != " + RHS->to_string();
 }
 #endif
 
@@ -122,7 +134,7 @@ size_t hash<equality>::operator()(const equality& x) const {
 size_t hash<less_than>::operator()(const less_than& x) const {
     auto h = (size_t)x.LHS;
     h ^= (size_t)x.RHS + 0x9e3779b9 + (h << 6) + (h >> 2);
-    return h + x.eq;
+    return h;
 }
 
 unsigned term_instance::cpy_idx() const {

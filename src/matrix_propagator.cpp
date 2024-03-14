@@ -364,7 +364,7 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
                 stack<less_than> stack;
                 for (unsigned i = info->clause->variables.size(); i > 0; i--) {
                     term* var = info->clause->variables[i - 1];
-                    stack.emplace(var->get_instance(info->copyIdx, *this),  var->get_instance(info->copyIdx - 1, *this), false);
+                    stack.emplace(var->get_instance(info->copyIdx, *this),  var->get_instance(info->copyIdx - 1, *this));
                 }
                 bool eq = false;
                 std::vector<less_than> subproblems;
@@ -414,7 +414,9 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
         for (const auto& less : info->delayedRelevantLess) {
             try {
                 LogN("Delayed: " << less.to_string());
-                if (!term_solver.asserted_eq(less.just, less.LHS, less.RHS, less.eq))
+                literal lit = term_solver.make_less_atom(less.LHS, less.RHS);
+
+                if (!term_solver.asserted_less(lit, less.LHS, less.RHS))
                     return;
             }
             catch (...) {

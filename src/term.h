@@ -211,9 +211,7 @@ struct less_than {
 #endif
 };
 
-class equality {
-
-public:
+struct equality {
     term_instance* LHS = nullptr;
     term_instance* RHS = nullptr;
     justification just;
@@ -240,6 +238,20 @@ public:
 #endif
 };
 
+struct disequality {
+
+    term_instance* LHS = nullptr;
+    term_instance* RHS = nullptr;
+    literal just;
+
+    disequality() = default;
+    disequality(term_instance* lhs, term_instance* rhs, literal just);
+
+#ifndef NDEBUG
+    string to_string() const;
+#endif
+};
+
 namespace std {
     template <>
     struct hash<equality> {
@@ -259,26 +271,30 @@ struct term_instance {
     // enode
     term_instance* parent;
     vector<equality> actual_connections;
+    term_instance* next_sibling;
+    term_instance* prev_sibling;
     unsigned cnt = 1;
 
     // PO node
-    vector<tuple<term_instance*, justification>> greater;
-    vector<tuple<term_instance*, justification>> smaller;
+    vector<pair<term_instance*, literal>> greater;
+    vector<pair<term_instance*, literal>> smaller;
 
     // watches
     //vector<equality> eq_split_watches;
     //unsigned eq_split_watches_idx = 0;
-    vector<equality> diseq_split_watches;
+    vector<disequality> diseq_split_watches;
     unsigned diseq_split_watches_idx = 0;
     vector<Lazy*> diseq_watches;
-    vector<tuple<term_instance*, term_instance*, bool, literal>> smaller_watches;
+    vector<tuple<term_instance*, term_instance*, literal>> smaller_watches;
+    unsigned smaller_watches_idx = 0;
 
     bool is_root() const {
         return parent == this;
     }
 
 private:
-    term_instance(const term* term, clause_instance* origin) : t(term), origin(origin), parent(this) { }
+    term_instance(const term* term, clause_instance* origin) : t(term), origin(origin),
+                                                                parent(this), prev_sibling(this), next_sibling(this) { }
 
 public:
 

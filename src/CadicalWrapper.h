@@ -92,7 +92,6 @@ public:
     formula_term* mk_not(formula_term* c);
 
     formula_term* mk_or(std::vector<formula_term*> c, bool positive = false);
-
     formula_term* mk_and(std::vector<formula_term*> c, bool positive = false);
 
 #ifndef NDEBUG

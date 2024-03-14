@@ -12,10 +12,9 @@
 #define DEBUG
 #endif
 
-#ifndef NDEBUG
-// typedef term* expr;
-#else
-// typedef cnf expr;
+#ifdef NDEBUG
+// #undef assert
+// #define assert(X) do { if (!(X)) __builtin_unreachable(); } while(false)
 #endif
 
 using namespace std;

@@ -48,18 +48,23 @@ public:
     bool asserted(literal e, bool isTrue);
 
     bool asserted_eq(literal e, term_instance* lhs, term_instance* rhs, bool isTrue) const;
+    bool asserted_less(literal e, term_instance* lhs, term_instance* rhs) const;
 
     bool preprocess_equality(term_instance* lhs, term_instance* rhs, vector<equality>& subproblems);
     bool preprocess_less(stack<less_than> stack, vector<less_than>& subproblems, bool& eq);
 
     bool preprocess_less(term_instance* lhs, term_instance* rhs, vector<less_than>& subproblems, bool& eq) {
         stack<less_than> stack;
-        stack.emplace(lhs, rhs, false);
+        stack.emplace(lhs, rhs);
         return preprocess_less(std::move(stack), subproblems, eq);
     }
 
+    literal make_equality_atom(term_instance* lhs, term_instance* rhs);
+
     formula make_equality_expr(term_instance* lhs, term_instance* rhs);
     formula make_disequality_expr(term_instance* lhs, term_instance* Rhs);
+
+    literal make_less_atom(term_instance* lhs, term_instance* rhs);
 
     formula make_less_expr(vector<less_than> subproblems, bool eq);
     formula make_less_expr(term_instance* lhs, term_instance* rhs);
@@ -141,17 +146,15 @@ public:
 private:
 
     bool update_diseq(term_instance* b, term_instance* newRoot);
-    bool update_ineq(term_instance* newRoot);
 
 public:
-    bool unify_split(literal just, term_instance* lhs, term_instance* rhs);
-    bool unify_split(term_instance* lhs, term_instance* rhs, justification& just);
     bool non_unify_split(literal just, term_instance* lhs, term_instance* rhs);
-    bool non_unify_split(term_instance* lhs, term_instance* rhs, justification& just);
+    tri_state test_non_unify_split(literal lit, term_instance* lhs, term_instance* rhs);
     bool unify(literal just, term_instance* lhs, term_instance* rhs);
     bool are_equal(term_instance* lhs, term_instance* rhs);
     bool non_unify(literal just, term_instance* lhs, term_instance* rhs);
     bool less(literal just, term_instance* lhs, term_instance* rhs);
+    tri_state test_less(literal just, term_instance* lhs, term_instance* rhs);
 
 
 private:
@@ -162,11 +165,56 @@ private:
 
     bool check_containment_cycle(term_instance* inst, justification& justifications);
     bool check_cycle(term_instance* inst, term_instance* search, justification& justifications);
-    bool check_smaller_cycle(term_instance* start, term_instance* current, justification& just, vector<term_instance*>& path, bool smaller);
+
+    template<bool smaller>
+    bool check_smaller_cycle(term_instance* start, term_instance* startRoot, term_instance* current, justification& just) {
+        assert(startRoot->is_root());
+        assert(start->find_root((propagator_base&)propagator()) == startRoot);
+
+        auto* currentRoot = current->find_root((propagator_base&)propagator());
+
+        if (startRoot == currentRoot) {
+            
+            conflict(just);
+            return false;
+        }
+
+        if (start->t->is_const() && current->t->is_const() &&
+            start->t->FuncID != current->t->FuncID &&
+            smaller == (start->t->FuncID < current->t->FuncID)) {
+
+            conflict(just);
+            return false;
+        }
+
+        const unsigned cnt = smaller ? current->smaller.size() : current->greater.size();
+        auto& children = smaller ? current->smaller : current->greater;
+
+        for (auto i = 0; i < cnt; i++) {
+            auto& [inst, justifications] = children[i];
+
+            term_instance* current2 = inst->find_root((propagator_base&)propagator());
+            assert(current2 != current);
+
+            unsigned prevLit = just.litJust.size();
+            unsigned prevEq = just.eqJust.size();
+            just.add_equality(current2, inst);
+            just.add(justifications);
+            if (!check_smaller_cycle<smaller>(start, current2, just))
+                return false;
+            just.litJust.resize(prevLit);
+            just.eqJust.resize(prevEq);
+        }
+        return true;
+    }
 
 
-    bool add_root(term_instance* b, term_instance* newRoot, bool incIneq = true);
-    bool merge_root(term_instance* r1, term_instance* r2, const equality& eq, bool incIneq = true);
+    bool check_diseq_replacement(term_instance* newRoot);
+    bool check_less_replacement(term_instance* newRoot);
+    bool check_smaller_cycle(term_instance* t1, term_instance* t2);
+
+    bool add_root(term_instance* b, term_instance* newRoot);
+    bool merge_root(term_instance* r1, term_instance* r2, const equality& eq);
 
 public:
     static void find_just(term_instance* n1, term_instance* n2, justification& minimalJust);

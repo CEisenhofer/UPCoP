@@ -561,11 +561,6 @@ formula_term* formula_manager::mk_or(std::vector<formula_term*> c, bool positive
         return ret;
     }
     ret = new or_term(*this, c, positive);
-#ifndef NDEBUG
-    for (const auto& n : names) {
-        assert(n.second != ret->to_string());
-    }
-#endif
     or_cache.insert(std::make_pair(c, ret));
     return ret;
 }
@@ -600,11 +595,6 @@ formula_term* formula_manager::mk_and(std::vector<formula_term*> c, bool positiv
         return ret;
     }
     ret = new and_term(*this, c, positive);
-#ifndef NDEBUG
-    for (const auto& n : names) {
-        assert(n.second != ret->to_string());
-    }
-#endif
     and_cache.insert(std::make_pair(c, ret));
     return ret;
 }

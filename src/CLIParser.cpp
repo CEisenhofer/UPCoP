@@ -7,7 +7,7 @@ static void CrashParams(const std::string& error) {
     if (!error.empty())
         std::cout << "Error: " << error << '\n';
     std::cout
-            << "Usage: ConnectionCalculus [-d initial_depth] [-dm max_depth] [-t timeout : ms] [-m [core|rect] [--input_syntax [tptp|smtlib]] [--no-preprocess] [--preprocess] [--conj] [-c [auto|keep|pos|neg|min]] [--split] [--check_smaller_cycle] path-to-smt2"
+            << "Usage: ConnectionCalculus [-d initial_depth] [-dm max_depth] [-t timeout : ms] [-m [core|rect] [--input_syntax [tptp|smtlib]] [--no-preprocess] [--preprocess] [--conj] [-c [auto|keep|pos|neg|min]] [--split] [--check] path-to-smt2"
             << std::endl;
     exit(-1);
 }
@@ -84,7 +84,7 @@ void parse_params(int argc, char* argv[], ProgParams& progParams) {
             i++;
             continue;
         }
-        if (current == "--check_smaller_cycle") {
+        if (current == "--check") {
             progParams.CheckProof = true;
             i++;
             continue;
