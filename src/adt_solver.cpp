@@ -1,7 +1,6 @@
 #include "matrix_propagator.h"
 
 static unsigned conflicts = 0;
-static unsigned cnt = 0;
 
 complex_adt_solver::~complex_adt_solver() {
     for (auto& solver : solvers) {
@@ -920,7 +919,8 @@ bool simple_adt_solver::less(literal just, term_instance* lhs, term_instance* rh
             vector<formula> cases2;
             cases2.reserve(i + 1);
             for (unsigned j = 0; j < i; j++) {
-                cases2[j] = complexSolver.make_equality_expr(r1->get_arg(j, propagator()), r2->get_arg(j, propagator()));
+                cases2[j] = complexSolver.make_equality_expr(r1->get_arg(j, propagator()),
+                                                             r2->get_arg(j, propagator()));
             }
             cases2[i] = complexSolver.make_less_expr(r1->get_arg(i, propagator()), r2->get_arg(i, propagator()));
             cases[i] = propagator().m.mk_and(cases2);
@@ -929,7 +929,8 @@ bool simple_adt_solver::less(literal just, term_instance* lhs, term_instance* rh
             vector<formula> cases2;
             cases2.reserve(r1->t->Args.size());
             for (int i = 0; i < r1->t->Args.size(); i++) {
-                cases2[i] = complexSolver.make_equality_expr(r1->get_arg(i, propagator()), r2->get_arg(i, propagator()));
+                cases2[i] = complexSolver.make_equality_expr(r1->get_arg(i, propagator()),
+                                                             r2->get_arg(i, propagator()));
             }
             cases[r1->t->Args.size()] = propagator().m.mk_and(cases2);
         }
@@ -941,53 +942,53 @@ bool simple_adt_solver::less(literal just, term_instance* lhs, term_instance* rh
         return true;
     }
     if (r1->t->is_var()) {
-        r1->smaller_watches.emplace_back(lhs, rhs, eq, just);
+        r1->smaller_watches.emplace_back(lhs, rhs, just);
         propagator().add_undo([r1]() { r1->smaller_watches.pop_back(); });
     }
     else {
-        r2->smaller_watches.emplace_back(lhs, rhs, eq, just);
+        r2->smaller_watches.emplace_back(lhs, rhs, just);
         propagator().add_undo([r2]() { r2->smaller_watches.pop_back(); });
     }
 
     return true;
 }
 
-bool simple_adt_solver::check_smaller_cycle(term_instance* start, term_instance* current, justification& just, vector<term_instance*>& path, bool smaller) {
-    term_instance* r1 = start->find_root(propagator());
-    term_instance* r2 = current->find_root(propagator());
-    if (r1 == r2) {
-        conflict(just);
-        return false;
-    }
-    just.add_equality(start, r1);
-    just.add_equality(current, r2);
-    if (start->t->is_const() && r2->t->is_const() && r1->t->FuncID != r2->t->FuncID && smaller == (r1->t->FuncID < r2->t->FuncID)) {
+bool simple_adt_solver::check_smaller_cycle(term_instance* start, term_instance* current, justification& just,
+                                            vector<term_instance*>& path, bool smaller) {
+    assert(start->is_root());
+    assert(current->is_root());
+
+    if (start == current) {
         conflict(just);
         return false;
     }
 
-    unsigned cnt = smaller ? r2->smaller.size() : r2->greater.size();
-    auto& children = smaller ? r2->smaller : r2->greater;
+    if (start->t->is_const() && current->t->is_const() &&
+        start->t->FuncID != current->t->FuncID &&
+        smaller == (start->t->FuncID < current->t->FuncID)) {
+
+        conflict(just);
+        return false;
+    }
+
+    const unsigned cnt = smaller ? current->smaller.size() : current->greater.size();
+    auto& children = smaller ? current->smaller : current->greater;
 
     for (auto i = 0; i < cnt; i++) {
         auto& [inst, justifications] = children[i];
 
-        if (inst->find_root(propagator()) == r2) {
-            assert(b);
-            continue;
-        }
+        term_instance* current2 = inst->find_root(propagator());
+        assert(current2 != current);
 
         unsigned prevLit = just.litJust.size();
         unsigned prevEq = just.eqJust.size();
+        just.add_equality(current2, inst);
         just.add(justifications);
-        if (!check_smaller_cycle(r1, inst, just, path, smaller))
+        if (!check_smaller_cycle(start, current, just, path, smaller))
             return false;
         just.litJust.resize(prevLit);
         just.eqJust.resize(prevEq);
     }
-
-    just.remove_equality();
-    just.remove_equality();
     return true;
 }
 
