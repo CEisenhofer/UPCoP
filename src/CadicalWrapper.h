@@ -359,9 +359,7 @@ private:
     std::vector<std::vector<int>> pending_hard_propagations;
 
     std::vector<unsigned> soft_propagation_limit;
-    std::vector<unsigned> soft_propagation_read_limit;
     std::vector<std::pair<std::vector<int>, int>> pending_soft_propagations;
-    // unfortunately we cannot just assume that this list is empty on push (...)
     unsigned soft_propagations_explanation_idx = 0;
     std::vector<std::vector<int>> soft_justifications;
     unsigned soft_propagation_read_idx = 0;

@@ -266,11 +266,9 @@ void CaDiCal_propagator::notify_new_decision_level() {
     LogN("Pushed " + to_string(undo_stack_limit.size()));
     decision_level++;
     undo_stack_limit.push_back(undo_stack.size());
-    soft_propagation_limit.push_back(pending_soft_propagations.size());
-    soft_propagation_read_limit.push_back(soft_propagation_read_idx);
 
     assert(pending_hard_propagations.size() == pending_hard_propagations_idx);
-    assert(pending_soft_propagations.size() == soft_propagation_read_idx);
+    assert(pending_soft_propagations.empty());
 }
 
 void CaDiCal_propagator::notify_backtrack(size_t new_level) {
@@ -289,18 +287,14 @@ void CaDiCal_propagator::notify_backtrack(size_t new_level) {
 
     assert(soft_propagations_explanation_idx == 0);
 
-    const unsigned to = soft_propagation_read_idx; // maybe it conflicted before so just clear up to there
-    soft_propagation_read_idx = soft_propagation_read_limit[new_level];
     const unsigned prevPending = soft_propagation_limit[new_level];
-    soft_propagation_read_limit.resize(new_level);
     soft_propagation_limit.resize(new_level);
 
-    for (unsigned i = soft_propagation_read_idx; i < to; i++) {
-        assert(soft_justifications[literal_to_idx(pending_soft_propagations[i].second)].size() > 1);
+    for (unsigned i = prevPending; i < soft_propagation_read_idx; i++) {
         soft_justifications[literal_to_idx(pending_soft_propagations[i].second)].clear();
     }
     pending_soft_propagations.resize(prevPending);
-    assert(soft_propagation_read_idx <= pending_soft_propagations.size());
+    soft_propagation_read_idx = pending_soft_propagations.size();
 
     const unsigned prevAction = undo_stack_limit[new_level];
     undo_stack_limit.resize(new_level);
@@ -330,6 +324,8 @@ int CaDiCal_propagator::cb_propagate() {
     auto& [just, prop] = pending_soft_propagations[soft_propagation_read_idx++];
     int ret = prop;
     const unsigned idx = literal_to_idx(ret);
+    assert(!just.empty());
+    assert(soft_justifications[idx].empty());
     soft_justifications[idx] = just;
 #ifdef PUSH_POP
     undo_stack.emplace_back([this, idx](){ soft_justifications[idx].clear(); });

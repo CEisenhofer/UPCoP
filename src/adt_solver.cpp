@@ -874,6 +874,7 @@ bool simple_adt_solver::less(literal just, term_instance* lhs, term_instance* rh
 
     start_mark();
     if (!check_smaller_cycle(rhs, rhs->find_root(propagator()), lhs, j)) {
+        conflict(j);
         end_mark();
         return false;
     }
@@ -967,6 +968,7 @@ bool simple_adt_solver::is_reachable(term_instance* from, term_instance* to) {
     return true;
 }
 
+// does not add conflicts - has to be done separately!!
 bool simple_adt_solver::check_smaller_cycle(term_instance* start, term_instance* startRoot, term_instance* current, justification& just) {
     assert(startRoot->is_root());
     assert(start->find_root((propagator_base&)propagator()) == startRoot);
@@ -975,17 +977,15 @@ bool simple_adt_solver::check_smaller_cycle(term_instance* start, term_instance*
 
     if (startRoot == currentRoot) {
         just.add_equality(start, current);
-        conflict(just);
         return false;
     }
 
-    // TODO: Not sure that we need this check
+    // TODO: Not sure that we need this check - Update: Yes, we do but maybe not the one in test_less
     if (startRoot->t->is_const() && currentRoot->t->is_const() &&
         startRoot->t->FuncID != currentRoot->t->FuncID &&
         startRoot->t->FuncID < currentRoot->t->FuncID) {
         just.add_equality(start, startRoot);
         just.add_equality(current, currentRoot);
-        conflict(just);
         return false;
     }
 
@@ -1065,15 +1065,14 @@ bool simple_adt_solver::check_less_replacement(term_instance* newRoot) {
     return true;
 }
 
-bool simple_adt_solver::add_root(term_instance* b, term_instance* newRoot) {
+bool simple_adt_solver::add_root(term_instance* b, term_instance* newRoot, const equality& eq) {
     assert(b->is_root());
     assert(newRoot->is_root());
     assert(b != newRoot); // this is important, as the internal dependency graph has to be spanning to use depth-first search for justifications
 
-    // We do this before merging to make the graph search easier
+    // we have to postpone the conflict until we actually merged the eq-classes
     justification just;
-    if (!check_smaller_cycle(b, b->find_root(propagator()), newRoot, just))
-        return false;
+    bool succ = check_smaller_cycle(eq.LHS, eq.LHS->find_root(propagator()), eq.RHS, just);
 
     unsigned prevCnt = newRoot->cnt;
 
@@ -1099,12 +1098,15 @@ bool simple_adt_solver::add_root(term_instance* b, term_instance* newRoot) {
     b->parent = newRoot;
     newRoot->cnt += b->cnt;
 
+    if (!succ) {
+        // now it is safe to report the conflict
+        just.add_equality(eq.LHS, eq.RHS);
+        conflict(just);
+        return false;
+    }
+
     if (!check_containment_cycle(newRoot))
         return false;
-    // Should be done by preprocessing
-    // if (b->t->is_const() && !check_containment_cycle(b))
-    //    // Required for eg. x = f(a), x = f(x) <- the second would be immediately merged and we would only check f(a) for a cycle
-    //    return false;
 
     if (complexSolver.propagator().is_adt_split()) {
         if (!check_diseq_replacement(newRoot))
@@ -1146,12 +1148,12 @@ bool simple_adt_solver::merge_root(term_instance* r1, term_instance* r2, const e
     if (r1->t->is_const() != r2->t->is_const())
         // Prefer constant roots
         return r1->t->is_const()
-               ? add_root(r2, r1)
-               : add_root(r1, r2);
+               ? add_root(r2, r1, eq)
+               : add_root(r1, r2, eq);
 
     return r1->cnt > r2->cnt
-           ? add_root(r2, r1)
-           : add_root(r1, r2);
+           ? add_root(r2, r1, eq)
+           : add_root(r1, r2, eq);
 }
 
 void simple_adt_solver::find_just(term_instance* n1, term_instance* n2, justification& minimalJust) {

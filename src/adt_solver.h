@@ -209,7 +209,7 @@ private:
     bool check_diseq_replacement(term_instance* newRoot);
     bool check_less_replacement(term_instance* newRoot);
 
-    bool add_root(term_instance* b, term_instance* newRoot);
+    bool add_root(term_instance* b, term_instance* newRoot, const equality& eq);
     bool merge_root(term_instance* r1, term_instance* r2, const equality& eq);
 
 public:
