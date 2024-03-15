@@ -65,6 +65,8 @@ struct term_instance;
 
 class term : public raw_term {
 
+    friend class simple_adt_solver;
+
     mutable vector<term_instance*> instances;
 
     const unsigned ast_id;
@@ -73,6 +75,13 @@ class term : public raw_term {
 public:
 
     simple_adt_solver& Solver;
+
+#ifndef NDEBUG
+private:
+    const string name;
+
+public:
+#endif
 
     unsigned solver_id() const;
     const indexed_clause* clause() const {
@@ -144,6 +153,7 @@ struct justification {
     }
 
     void add_equality(term_instance* lhs, term_instance* rhs) {
+        // this is not an equivalence class; order does not matter
         eqJust.emplace_back(lhs, rhs);
     }
 
@@ -264,6 +274,7 @@ namespace std {
 }
 
 struct term_instance {
+
     // ast
     const term* t;
     clause_instance* const origin;
@@ -275,8 +286,9 @@ struct term_instance {
     term_instance* prev_sibling;
     unsigned cnt = 1;
 
+    unsigned marked = 0;
+
     // PO node
-    vector<pair<term_instance*, literal>> greater;
     vector<pair<term_instance*, literal>> smaller;
 
     // watches
@@ -288,13 +300,22 @@ struct term_instance {
     vector<tuple<term_instance*, term_instance*, literal>> smaller_watches;
     unsigned smaller_watches_idx = 0;
 
+#ifndef NDEBUG
+    const string name;
+#endif
+
     bool is_root() const {
         return parent == this;
     }
 
 private:
-    term_instance(const term* term, clause_instance* origin) : t(term), origin(origin),
-                                                                parent(this), prev_sibling(this), next_sibling(this) { }
+    term_instance(const term* term, clause_instance* origin) :
+                                                                t(term), origin(origin),
+                                                                parent(this), prev_sibling(this), next_sibling(this)
+#ifndef NDEBUG
+                                                                , name(to_string())
+#endif
+                                                                { }
 
 public:
 

@@ -136,7 +136,29 @@ bool complex_adt_solver::asserted_eq(literal e, term_instance* lhs, term_instanc
 
 bool complex_adt_solver::asserted_less(literal e, term_instance* lhs, term_instance* rhs) const {
     assert(&lhs->t->Solver == &rhs->t->Solver);
-    return lhs->t->Solver.test_less(e, lhs, rhs);
+    return lhs->t->Solver.less(e, lhs, rhs);
+}
+
+bool complex_adt_solver::contains_cycle(term_instance* t, term_instance* c) const {
+    assert(c->t->is_const());
+    assert(t->t->is_var());
+    stack<term_instance*> stack;
+    stack.push(c);
+    while (!stack.empty()) {
+        auto* current = stack.top();
+        stack.pop();
+        if (current->t->is_ground())
+            continue;
+        if (current->t->is_const()) {
+            for (auto* arg : current->t->Args) {
+                stack.push(arg->get_instance(current->cpy_idx(), propagator()));
+            }
+            continue;
+        }
+        if (current == t)
+            return true;
+    }
+    return false;
 }
 
 bool complex_adt_solver::preprocess_equality(term_instance* lhs, term_instance* rhs, vector<equality>& subproblems) {
@@ -156,7 +178,15 @@ bool complex_adt_solver::preprocess_equality(term_instance* lhs, term_instance* 
             }
         }
         else {
-            subproblems.emplace_back(lhs2, rhs2);
+            if (lhs2->t->is_var() && rhs2->t->is_var()) {
+                subproblems.emplace_back(lhs2, rhs2);
+                continue;
+            }
+            if ((lhs2->t->is_const() && !contains_cycle(rhs2, lhs2)) ||
+                (rhs2->t->is_const() && !contains_cycle(lhs2, rhs2)))
+                subproblems.emplace_back(lhs2, rhs2);
+            else
+                return false;
         }
     }
     return true;
@@ -579,6 +609,7 @@ bool simple_adt_solver::non_unify_split(literal just, term_instance* lhs, term_i
             // We need to observe only one side (we don't care if it is a constant, as we would also get merge callbacks on them)
             // just take the lhs
             lhs->diseq_split_watches.emplace_back(lhs, rhs, just);
+            propagator().add_undo([lhs]() { lhs->diseq_split_watches.pop_back(); });
             return true;
     }
 }
@@ -591,8 +622,7 @@ tri_state simple_adt_solver::test_non_unify_split(literal lit, term_instance* lh
     if (r1 == r2) {
         justification justList;
         justList.add_literal(lit);
-        justList.add_equality(r1, lhs);
-        justList.add_equality(r2, rhs);
+        justList.add_equality(lhs, rhs);
         conflict(justList);
         return unsat;
     }
@@ -603,14 +633,16 @@ tri_state simple_adt_solver::test_non_unify_split(literal lit, term_instance* lh
 
         formula f = complexSolver.make_disequality_expr(r1, r2);
         assert(!f->is_true());
+        justification justList;
+        justList.add_literal(lit);
+        justList.add_equality(lhs, r1);
+        justList.add_equality(rhs, r2);
+
         if (f->is_false()) {
-            justification justList;
-            justList.add_literal(lit);
-            justList.add_equality(r1, lhs);
-            justList.add_equality(r2, rhs);
             conflict(justList);
             return unsat;
         }
+        propagate(justList, f);
         return sat;
     }
     return undef;
@@ -654,13 +686,13 @@ bool simple_adt_solver::unify(term_instance* lhs, term_instance* rhs, justificat
 
     term_instance* r1 = lhs->find_root(propagator());
     term_instance* r2 = rhs->find_root(propagator());
-    justifications.add_equality(lhs, r1);
-    justifications.add_equality(rhs, r2);
 
     if (r1 == r2)
         return true;
 
     if (r1->t->is_const() && r2->t->is_const()) {
+        justifications.add_equality(lhs, r1);
+        justifications.add_equality(rhs, r2);
         if (r1->t->FuncID != r2->t->FuncID) {
             conflict(justifications);
             return false;
@@ -675,10 +707,10 @@ bool simple_adt_solver::unify(term_instance* lhs, term_instance* rhs, justificat
     }
 
     if (merge_root(r1, r2, { lhs, rhs, { justifications } })) {
-        justifications.remove_equality();
-        justifications.remove_equality();
         return true;
     }
+    justifications.add_equality(lhs, r1);
+    justifications.add_equality(rhs, r2);
     conflict(justifications);
     return false;
 }
@@ -764,20 +796,20 @@ z3::check_result simple_adt_solver::non_unify(Lazy* lazy) {
     return z3::check_result::unsat;
 }
 
-bool simple_adt_solver::check_containment_cycle(term_instance* inst, justification& justifications) {
+bool simple_adt_solver::check_containment_cycle(term_instance* inst) {
     if (!inst->t->is_const() || inst->t->is_ground())
         return true;
     auto* r = inst->find_root(propagator());
+    justification justifications;
     justifications.add_equality(inst, r);
     for (auto* arg : inst->t->Args) {
-        if (!check_cycle(arg->get_instance(inst->cpy_idx(), propagator()), r, justifications))
+        if (!check_containment_cycle(arg->get_instance(inst->cpy_idx(), propagator()), r, justifications))
             return false;
     }
-    justifications.remove_equality();
     return true;
 }
 
-bool simple_adt_solver::check_cycle(term_instance* inst, term_instance* search, justification& justifications) {
+bool simple_adt_solver::check_containment_cycle(term_instance* inst, term_instance* search, justification& justifications) {
     assert(search->is_root());
     auto* r = inst->find_root(propagator());
 
@@ -793,7 +825,7 @@ bool simple_adt_solver::check_cycle(term_instance* inst, term_instance* search, 
 
     justifications.add_equality(inst, r);
     for (auto* arg : r->t->Args) {
-        if (!check_cycle(arg->get_instance(r->cpy_idx(), propagator()), search, justifications))
+        if (!check_containment_cycle(arg->get_instance(r->cpy_idx(), propagator()), search, justifications))
             return false;
     }
     justifications.remove_equality();
@@ -828,6 +860,25 @@ bool simple_adt_solver::non_unify(literal just, term_instance* lhs, term_instanc
 }
 
 bool simple_adt_solver::less(literal just, term_instance* lhs, term_instance* rhs) {
+
+    start_mark();
+    if (!is_reachable(lhs->find_root(propagator()), rhs->find_root(propagator()))) {
+        // redundant
+        end_mark();
+        return false;
+    }
+    end_mark();
+
+    justification j;
+    j.add_literal(just);
+
+    start_mark();
+    if (!check_smaller_cycle(rhs, rhs->find_root(propagator()), lhs, j)) {
+        end_mark();
+        return false;
+    }
+    end_mark();
+
     switch (test_less(just, lhs, rhs)) {
         case sat:
             return true;
@@ -836,19 +887,16 @@ bool simple_adt_solver::less(literal just, term_instance* lhs, term_instance* rh
         default: {
             lhs->smaller_watches.emplace_back(lhs, rhs, just);
             rhs->smaller_watches.emplace_back(lhs, rhs, just);
-            unsigned prevGreaterCnt = lhs->greater.size();
             unsigned prevSmallerCnt = rhs->smaller.size();
-
-            lhs->greater.emplace_back(rhs, just);
             rhs->smaller.emplace_back(lhs, just);
 
-            propagator().add_undo([lhs, rhs, prevGreaterCnt, prevSmallerCnt]() {
-                lhs->greater.pop_back();
+            propagator().add_undo([lhs, rhs, prevSmallerCnt]() {
+                lhs->smaller_watches.pop_back();
+                rhs->smaller_watches.pop_back();
                 rhs->smaller.pop_back();
-                assert(lhs->greater.size() == prevGreaterCnt);
                 assert(rhs->smaller.size() == prevSmallerCnt);
             });
-            return check_smaller_cycle(lhs, rhs);
+            return true;
         }
     }
 }
@@ -881,14 +929,86 @@ tri_state simple_adt_solver::test_less(literal just, term_instance* lhs, term_in
 
         assert(!r1->t->Args.empty());
 
+        formula f = complexSolver.make_less_expr(r1, r2);
+        assert(!f->is_true());
         justification justList;
         justList.add_literal(just);
         justList.add_equality(lhs, r1);
         justList.add_equality(rhs, r2);
-        propagate(justList, complexSolver.make_less_expr(r1, r2));
+
+        if (f->is_false()) {
+            conflict(justList);
+            return unsat;
+        }
+        propagate(justList, f);
         return sat;
     }
     return undef;
+}
+
+bool simple_adt_solver::is_reachable(term_instance* from, term_instance* to) {
+    assert(from->is_root());
+    assert(to->is_root());
+
+    if (from == to)
+        return true;
+
+    term_instance* current2 = to;
+    do {
+        const unsigned cnt = to->smaller.size();
+        auto& children = to->smaller;
+
+        for (auto i = 0; i < cnt; i++) {
+            if (!is_reachable(from, children[i].first->find_root(propagator())))
+                return false;
+        }
+        current2 = current2->next_sibling;
+    } while (current2 != to);
+    return true;
+}
+
+bool simple_adt_solver::check_smaller_cycle(term_instance* start, term_instance* startRoot, term_instance* current, justification& just) {
+    assert(startRoot->is_root());
+    assert(start->find_root((propagator_base&)propagator()) == startRoot);
+
+    auto* currentRoot = current->find_root((propagator_base&)propagator());
+
+    if (startRoot == currentRoot) {
+        just.add_equality(start, current);
+        conflict(just);
+        return false;
+    }
+
+    // TODO: Not sure that we need this check
+    if (startRoot->t->is_const() && currentRoot->t->is_const() &&
+        startRoot->t->FuncID != currentRoot->t->FuncID &&
+        startRoot->t->FuncID < currentRoot->t->FuncID) {
+        just.add_equality(start, startRoot);
+        just.add_equality(current, currentRoot);
+        conflict(just);
+        return false;
+    }
+
+    term_instance* current2 = current;
+    do {
+
+        const unsigned cnt = current->smaller.size();
+        auto& children = current->smaller;
+
+        for (auto i = 0; i < cnt; i++) {
+            auto& [inst, justifications] = children[i];
+
+            just.add_equality(current, current2);
+            just.add_literal(justifications);
+            if (!check_smaller_cycle(start, startRoot, inst, just))
+                return false;
+            just.litJust.pop_back();
+            just.eqJust.pop_back();
+        }
+
+        current2 = current2->next_sibling;
+    } while (current2 != current);
+    return true;
 }
 
 bool simple_adt_solver::check_diseq_replacement(term_instance* newRoot) {
@@ -945,24 +1065,14 @@ bool simple_adt_solver::check_less_replacement(term_instance* newRoot) {
     return true;
 }
 
-bool simple_adt_solver::check_smaller_cycle(term_instance* t1, term_instance* t2) {
-    assert(t1 != t2);
-    justification j;
-    if (!check_smaller_cycle<false>(t1, t1->find_root(propagator()), t2, j))
-        return false;
-    assert(j.empty());
-    if (!check_smaller_cycle<true>(t1, t1->find_root(propagator()), t2, j))
-        return false;
-    assert(j.empty());
-    return true;
-}
-
 bool simple_adt_solver::add_root(term_instance* b, term_instance* newRoot) {
     assert(b->is_root());
     assert(newRoot->is_root());
+    assert(b != newRoot); // this is important, as the internal dependency graph has to be spanning to use depth-first search for justifications
 
     // We do this before merging to make the graph search easier
-    if (!check_smaller_cycle(b, newRoot))
+    justification just;
+    if (!check_smaller_cycle(b, b->find_root(propagator()), newRoot, just))
         return false;
 
     unsigned prevCnt = newRoot->cnt;
@@ -989,13 +1099,12 @@ bool simple_adt_solver::add_root(term_instance* b, term_instance* newRoot) {
     b->parent = newRoot;
     newRoot->cnt += b->cnt;
 
-    justification just;
-    if (!check_containment_cycle(newRoot, just))
+    if (!check_containment_cycle(newRoot))
         return false;
-    assert(just.empty());
-    if (b->t->is_const() && !check_containment_cycle(b, just))
-        // Required for eg. x = f(a), x = f(x) <- the second would be immediately merged and we would only check f(a) for a cycle
-        return false;
+    // Should be done by preprocessing
+    // if (b->t->is_const() && !check_containment_cycle(b))
+    //    // Required for eg. x = f(a), x = f(x) <- the second would be immediately merged and we would only check f(a) for a cycle
+    //    return false;
 
     if (complexSolver.propagator().is_adt_split()) {
         if (!check_diseq_replacement(newRoot))

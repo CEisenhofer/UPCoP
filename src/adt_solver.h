@@ -50,6 +50,7 @@ public:
     bool asserted_eq(literal e, term_instance* lhs, term_instance* rhs, bool isTrue) const;
     bool asserted_less(literal e, term_instance* lhs, term_instance* rhs) const;
 
+    bool contains_cycle(term_instance* t, term_instance* c) const;
     bool preprocess_equality(term_instance* lhs, term_instance* rhs, vector<equality>& subproblems);
     bool preprocess_less(stack<less_than> stack, vector<less_than>& subproblems, bool& eq);
 
@@ -101,6 +102,8 @@ class simple_adt_solver {
     unordered_map<string, int> nameToId;
     unordered_map<RawTermWrapper, term*> hashCon;
 
+    unsigned markIdx = 0;
+
     void conflict(const justification& just);
     void propagate(const justification& just, formula prop);
     bool soft_propagate(const justification& just, literal prop);
@@ -115,6 +118,40 @@ public:
 
     inline matrix_propagator& propagator() const {
         return complexSolver.propagator();
+    }
+
+#ifndef NDEBUG
+    bool is_marking = false;
+#endif
+
+    inline void start_mark() {
+        assert(!is_marking);
+        [[likely]]
+        if (markIdx < UINT_MAX) {
+            markIdx++;
+            return;
+        }
+
+        for (auto& [_, t] : hashCon) {
+            for (auto& inst : t->instances) {
+                inst->marked = 0;
+            }
+        }
+        markIdx = 1;
+    }
+
+    inline void end_mark() {
+#ifndef NDEBUG
+        assert(!is_marking);
+        is_marking = false;
+#endif
+    }
+
+    inline bool mark(term_instance* t) const {
+        if (t->marked == markIdx)
+            return true;
+        t->marked = markIdx;
+        return false;
     }
 
     inline unsigned id() const {
@@ -148,6 +185,7 @@ private:
     bool update_diseq(term_instance* b, term_instance* newRoot);
 
 public:
+
     bool non_unify_split(literal just, term_instance* lhs, term_instance* rhs);
     tri_state test_non_unify_split(literal lit, term_instance* lhs, term_instance* rhs);
     bool unify(literal just, term_instance* lhs, term_instance* rhs);
@@ -163,55 +201,13 @@ private:
     z3::check_result non_unify(Lazy* lazy);
 
 
-    bool check_containment_cycle(term_instance* inst, justification& justifications);
-    bool check_cycle(term_instance* inst, term_instance* search, justification& justifications);
+    bool check_containment_cycle(term_instance* inst);
+    bool check_containment_cycle(term_instance* inst, term_instance* search, justification& justifications);
 
-    template<bool smaller>
-    bool check_smaller_cycle(term_instance* start, term_instance* startRoot, term_instance* current, justification& just) {
-        assert(startRoot->is_root());
-        assert(start->find_root((propagator_base&)propagator()) == startRoot);
-
-        auto* currentRoot = current->find_root((propagator_base&)propagator());
-
-        if (startRoot == currentRoot) {
-            
-            conflict(just);
-            return false;
-        }
-
-        if (start->t->is_const() && current->t->is_const() &&
-            start->t->FuncID != current->t->FuncID &&
-            smaller == (start->t->FuncID < current->t->FuncID)) {
-
-            conflict(just);
-            return false;
-        }
-
-        const unsigned cnt = smaller ? current->smaller.size() : current->greater.size();
-        auto& children = smaller ? current->smaller : current->greater;
-
-        for (auto i = 0; i < cnt; i++) {
-            auto& [inst, justifications] = children[i];
-
-            term_instance* current2 = inst->find_root((propagator_base&)propagator());
-            assert(current2 != current);
-
-            unsigned prevLit = just.litJust.size();
-            unsigned prevEq = just.eqJust.size();
-            just.add_equality(current2, inst);
-            just.add(justifications);
-            if (!check_smaller_cycle<smaller>(start, current2, just))
-                return false;
-            just.litJust.resize(prevLit);
-            just.eqJust.resize(prevEq);
-        }
-        return true;
-    }
-
-
+    bool is_reachable(term_instance* from, term_instance* to);
+    bool check_smaller_cycle(term_instance* start, term_instance* startRoot, term_instance* current, justification& just);
     bool check_diseq_replacement(term_instance* newRoot);
     bool check_less_replacement(term_instance* newRoot);
-    bool check_smaller_cycle(term_instance* t1, term_instance* t2);
 
     bool add_root(term_instance* b, term_instance* newRoot);
     bool merge_root(term_instance* r1, term_instance* r2, const equality& eq);

@@ -54,16 +54,20 @@ void CaDiCal_propagator::output_literals(const std::vector<literal>& lit) const 
             Log(", ");
     }
     if (!wrong_val.empty()) {
+        LogN("");
         for (const auto* j : wrong_val) {
             LogN("Inconsistent interpretation: " << literal_to_string(j) << " is not " << literal_to_polarity(j));
         }
     }
     if (!unassigned.empty()) {
+        LogN("");
         for (const auto* j : unassigned) {
             LogN("\nUnassigned: " << literal_to_string(j));
         }
     }
-    assert(wrong_val.empty() && unassigned.empty());
+    if (!(wrong_val.empty() && unassigned.empty())){
+        assert(false);
+    }
 }
 #endif
 
@@ -217,6 +221,8 @@ CaDiCal_propagator::CaDiCal_propagator(unsigned timeLeft) : m(this), solver(new 
     solver->set("ilbassumptions", 0);
     solver->set("chrono", 0);
     // solver->set("phase", 0);
+    // solver->set("inprocessing", 0);
+    solver->configure("plain");
     solver->connect_terminator(terminator);
     solver->connect_external_propagator(this);
     reset_names();

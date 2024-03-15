@@ -22,41 +22,56 @@ size_t std::hash<term_instance>::operator()(const term_instance& x) const {
 void justification::resolve_justification(simple_adt_solver* adtSolver, vector<literal>& just,
                                           unordered_map<term_instance*, unsigned>& termInstance, vector<unsigned>& parent) const {
 
-    static auto get_id = [](unordered_map<term_instance*, unsigned>& termInstance, vector<unsigned>& parent, term_instance* t) {
-        unsigned id = 0;
-        if (tryGetValue(termInstance, t, id))
-            return id;
-        id = termInstance.size();
-        termInstance.insert(make_pair(t, id));
-        parent.push_back(id);
-        return id;
-    };
-
-    static auto find = [](vector<unsigned>& parent, unsigned id) {
-        unsigned r = id;
-        while (r != parent[r]) {
-            r = parent[r] = parent[parent[r]];
-        }
-        return parent[id] = r;
-    };
-
-    static auto merge = [](vector<unsigned>& parent, unsigned id1, unsigned id2) {
-        parent[find(parent, id1)] = find(parent, id2);
-    };
-
     add_range(just, litJust);
-    for (auto [lhs, rhs] : eqJust) {
-        unsigned lhsId = get_id(termInstance, parent, lhs);
-        unsigned rhsId = get_id(termInstance, parent, rhs);
-        unsigned r1 = find(parent, lhsId);
-        unsigned r2 = find(parent, rhsId);
-        // Avoid finding the same justification over and over again
-        if (r1 == r2)
+
+    for (auto [from, to] : eqJust) {
+        if (from == to)
             continue;
-        merge(parent, lhsId, rhsId);
-        justification j;
-        simple_adt_solver::find_just(lhs, rhs, j);
-        j.resolve_justification(adtSolver, just, termInstance, parent);
+
+        assert(from->find_root(adtSolver->propagator()) == to->find_root(adtSolver->propagator()));
+
+        stack<tuple<term_instance*, term_instance*, justification*>> todo;
+        vector<justification*> eqJustifications;
+
+        for (auto& c : from->actual_connections) {
+            auto* local_to = c.GetOther(from);
+            if (to == local_to) {
+                c.just.resolve_justification(adtSolver, just);
+                goto next;
+            }
+            todo.emplace(from, local_to, &c.just);
+        }
+
+        while (!todo.empty()) {
+            auto [local_from, current, ej] = todo.top();
+            todo.pop();
+            if (local_from == nullptr) {
+                eqJustifications.pop_back();
+                continue;
+            }
+
+            todo.emplace(nullptr, nullptr, nullptr);
+            eqJustifications.push_back(ej);
+            assert(!current->actual_connections.empty());
+
+            for (auto& c : current->actual_connections) {
+                auto* local_to = c.GetOther(current);
+                if (local_to == local_from)
+                    continue; // don't go back
+                if (local_to == to) {
+                    eqJustifications.push_back(&c.just);
+                    for (auto* j : eqJustifications) {
+                        j->resolve_justification(adtSolver, just);
+                    }
+                    goto next;
+                }
+                todo.emplace(current, local_to, &c.just);
+            }
+        }
+
+        throw solving_exception("Could not resolve eq-justification");
+
+        next:;
     }
 }
 
@@ -174,7 +189,11 @@ z3::expr term_instance::to_z3(matrix_propagator& propagator, z3::context& contex
 unsigned term::solver_id() const { return Solver.id(); }
 
 term::term(int funcId, vector<term*> args, simple_adt_solver& solver, unsigned hashId, const indexed_clause* clause) :
-        raw_term(funcId, std::move(args)), ast_id(hashId), origin_clause(clause), Solver(solver) {
+        raw_term(funcId, std::move(args)), ast_id(hashId), origin_clause(clause), Solver(solver)
+#ifndef NDEBUG
+        , name(to_string())
+#endif
+        {
     assert((clause == nullptr) == (funcId >= 0 && all_of(Args.cbegin(), Args.cend(), [](term* o) { return o->is_ground(); })));
 }
 

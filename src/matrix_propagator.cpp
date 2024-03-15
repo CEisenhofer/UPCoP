@@ -444,7 +444,8 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
                         // clause->TautologyConstraints->emplace_back(k, l, diseq);
 
                         formula neq = diseq->GetNegConstraints(*this, info->literals[k], info->literals[l]);
-                        hard_propagate({ e }, neq);
+                        if (!neq->is_true())
+                            hard_propagate({ e }, neq);
                         delete diseq;
                     }
                 }
