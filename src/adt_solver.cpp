@@ -632,7 +632,8 @@ tri_state simple_adt_solver::test_non_unify_split(literal lit, term_instance* lh
             return sat;
 
         formula f = complexSolver.make_disequality_expr(r1, r2);
-        assert(!f->is_true());
+        if (f->is_true())
+            return sat;
         justification justList;
         justList.add_literal(lit);
         justList.add_equality(lhs, r1);
@@ -861,20 +862,20 @@ bool simple_adt_solver::non_unify(literal just, term_instance* lhs, term_instanc
 
 bool simple_adt_solver::less(literal just, term_instance* lhs, term_instance* rhs) {
 
-    start_mark();
-    if (!is_reachable(lhs->find_root(propagator()), rhs->find_root(propagator()))) {
-        // redundant
-        end_mark();
-        return false;
-    }
-    end_mark();
-
     justification j;
     j.add_literal(just);
 
     start_mark();
     if (!check_smaller_cycle(rhs, rhs->find_root(propagator()), lhs, j)) {
         conflict(j);
+        end_mark();
+        return false;
+    }
+    end_mark();
+
+    start_mark();
+    if (!is_reachable(lhs->find_root(propagator()), rhs->find_root(propagator()))) {
+        // redundant
         end_mark();
         return false;
     }
@@ -931,7 +932,8 @@ tri_state simple_adt_solver::test_less(literal just, term_instance* lhs, term_in
         assert(!r1->t->Args.empty());
 
         formula f = complexSolver.make_less_expr(r1, r2);
-        assert(!f->is_true());
+        if (f->is_true())
+            return sat;
         justification justList;
         justList.add_literal(just);
         justList.add_equality(lhs, r1);
@@ -956,8 +958,8 @@ bool simple_adt_solver::is_reachable(term_instance* from, term_instance* to) {
 
     term_instance* current2 = to;
     do {
-        const unsigned cnt = to->smaller.size();
-        auto& children = to->smaller;
+        const unsigned cnt = current2->smaller.size();
+        auto& children = current2->smaller;
 
         for (auto i = 0; i < cnt; i++) {
             if (!is_reachable(from, children[i].first->find_root(propagator())))
@@ -992,8 +994,8 @@ bool simple_adt_solver::check_smaller_cycle(term_instance* start, term_instance*
     term_instance* current2 = current;
     do {
 
-        const unsigned cnt = current->smaller.size();
-        auto& children = current->smaller;
+        const unsigned cnt = current2->smaller.size();
+        auto& children = current2->smaller;
 
         for (auto i = 0; i < cnt; i++) {
             auto& [inst, justifications] = children[i];
@@ -1073,6 +1075,10 @@ bool simple_adt_solver::add_root(term_instance* b, term_instance* newRoot, const
     // we have to postpone the conflict until we actually merged the eq-classes
     justification just;
     bool succ = check_smaller_cycle(eq.LHS, eq.LHS->find_root(propagator()), eq.RHS, just);
+    if (succ) {
+        assert(just.empty());
+        succ = check_smaller_cycle(eq.RHS, eq.RHS->find_root(propagator()), eq.LHS, just);
+    }
 
     unsigned prevCnt = newRoot->cnt;
 
@@ -1127,8 +1133,10 @@ bool simple_adt_solver::merge_root(term_instance* r1, term_instance* r2, const e
     if (r1 == r2)
         return true;
 
-    if (r1->t->is_const() && r2->t->is_const() && r1->t->FuncID != r2->t->FuncID)
+    if (r1->t->is_const() && r2->t->is_const() && r1->t->FuncID != r2->t->FuncID) {
+        assert(false); // Why would that happen; unify would have made a very bad job
         return false;
+    }
 
     auto* lhs = eq.LHS;
     auto* rhs = eq.RHS;

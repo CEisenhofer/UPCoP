@@ -24,7 +24,7 @@ term* variable_abstraction::apply(const vector<term*>& args) const {
 term* term_abstraction::apply(const vector<term*>& args) const {
     const indexed_clause* cl = nullptr;
     for (auto* arg : args) {
-        assert(cl == nullptr || cl == arg->clause());
+        assert(cl == nullptr || arg->clause() == nullptr || cl == arg->clause());
         if (arg->clause() != nullptr)
             cl = arg->clause();
     }
@@ -376,6 +376,11 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         std::vector<std::pair<unsigned, int>> sortedUsed = to_sorted_vector(usedClauses);
         for (auto& sorted : sortedUsed) {
             cout << "\tClause #" << sorted.first << ": " << sorted.second << endl;
+        }
+        vector<term_instance*> variables;
+        variables.reserve(prettyNames.size());
+        for (auto& entry : prettyNames) {
+            variables.push_back(entry.first);
         }
         propagator->check_proof(context);
         deleteCNF(cnf);

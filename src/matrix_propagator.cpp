@@ -187,12 +187,12 @@ void matrix_propagator::check_proof(z3::context& ctx) {
         }
 
         clauses.push_back(mk_or(literal));
+    }
 
-        for (auto* inst : terms) {
-            if (inst->is_root())
-                continue;
-            z3Solver.add(inst->to_z3(*this, ctx, lookup) == inst->find_root(*this)->to_z3(*this, ctx, lookup));
-        }
+    for (auto& pair : lookup) {
+        if (pair.first->is_root() || !(pair.first->t->is_var()))
+            continue;
+        z3Solver.add(*(pair.second) == pair.first->find_root(*this)->to_z3(*this, ctx, lookup));
     }
 
 
@@ -309,8 +309,6 @@ void matrix_propagator::pb_clause_limit() {
     }
 }
 
-static unsigned fixedCnt = 0;
-
 void matrix_propagator::fixed(literal_term* e, bool value) {
     if (is_conflict_flag)
         return;
@@ -329,8 +327,6 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
             }
             return;
         }
-
-        fixedCnt++;
 
         if (!value) {
             info->value = unsat;

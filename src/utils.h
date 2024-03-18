@@ -19,6 +19,12 @@
 
 using namespace std;
 
+enum tri_state : unsigned char {
+    undef = 0,
+    sat = 1,
+    unsat = 2,
+};
+
 inline string to_lower(const string& s) {
     string ret = s;
     transform(ret.begin(), ret.end(), ret.begin(),

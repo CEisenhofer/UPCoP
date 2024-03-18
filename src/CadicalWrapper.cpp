@@ -1,4 +1,5 @@
 #include "CadicalWrapper.h"
+#include <iostream>
 #include <chrono>
 
 #ifndef NDEBUG
@@ -42,13 +43,18 @@ void CaDiCal_propagator::output_literals(const std::vector<literal>& lit) const 
         if (seen.find(j) != seen.end())
             continue;
         bool val = false;
-        if (!get_value(j, val)) {
-            unassigned.push_back(j);
+        if (!j->is_true()) {
+            if (!get_value(j, val)) {
+                unassigned.push_back(j);
+            }
+            else if (val != (j->get_lit() > 0)) {
+                wrong_val.push_back(j);
+            }
+            Log(j->to_string());
         }
-        else if (val != literal_to_polarity(j)) {
-            wrong_val.push_back(j);
+        else {
+            Log("[" << j->to_string() << "]");
         }
-        Log(literal_to_string(j));
         seen.insert(j);
         if (i + 1 < lit.size())
             Log(", ");
@@ -56,13 +62,13 @@ void CaDiCal_propagator::output_literals(const std::vector<literal>& lit) const 
     if (!wrong_val.empty()) {
         LogN("");
         for (const auto* j : wrong_val) {
-            LogN("Inconsistent interpretation: " << literal_to_string(j) << " is not " << literal_to_polarity(j));
+            LogN("Inconsistent interpretation: " << j->to_string() << " is not " << (j->get_lit() > 0));
         }
     }
     if (!unassigned.empty()) {
         LogN("");
         for (const auto* j : unassigned) {
-            LogN("\nUnassigned: " << literal_to_string(j));
+            LogN("\nUnassigned: " << j->to_string());
         }
     }
     if (!(wrong_val.empty() && unassigned.empty())){
@@ -87,6 +93,8 @@ void CaDiCal_propagator::propagate_conflict(const std::vector<literal>& just) {
     std::vector<int> aux;
     aux.reserve(just.size());
     for (literal k: just) {
+        if (k->is_true())
+            continue;
         aux.push_back(-k->get_lit());
     }
 
@@ -121,6 +129,8 @@ bool CaDiCal_propagator::hard_propagate(const std::vector<literal>& just, formul
     aux.back().reserve(just.size());
     aux.back().push_back(c->get_lit());
     for (literal k: just) {
+        if (k->is_true())
+            continue;
         aux.back().push_back(-k->get_lit());
     }
     // aux.back().second = prop; -- not required; the get_lits should do that
@@ -158,16 +168,16 @@ bool CaDiCal_propagator::soft_propagate(const std::vector<literal>& just, litera
         return false;
     if (prop->is_true())
         return true;
-    if (!soft_justifications[literal_to_idx(prop->get_lit())].empty())
-        // Already propagated
-        return true;
     if (prop->is_false()) {
         propagate_conflict(just);
         return false;
     }
+    if (!soft_justifications[literal_to_idx(prop->get_lit())].empty())
+        // Already propagated
+        return true;
     bool val = false;
     if (get_value(prop, val)) {
-        if (literal_to_polarity(prop) == val)
+        if ((prop->get_lit() > 0) == val)
             // Already assigned
             return true;
         std::vector<literal> just2;
@@ -189,6 +199,8 @@ bool CaDiCal_propagator::soft_propagate(const std::vector<literal>& just, litera
     std::vector<int> j;
     j.reserve(just.size() + 1);
     for (literal k: just) {
+        if (k->is_true())
+            continue;
         j.push_back(-k->get_lit());
     }
     const int propLit = prop->get_lit();
@@ -205,33 +217,28 @@ bool CaDiCal_propagator::soft_propagate(const std::vector<literal>& just, litera
     return true;
 }
 
-class timeout_terminator : public CaDiCaL::Terminator {
-    decltype(std::chrono::high_resolution_clock::now()) stopTime;
-
-public:
-    explicit timeout_terminator(unsigned timeLeft) : stopTime(std::chrono::milliseconds(timeLeft) + std::chrono::high_resolution_clock::now()) { }
-
-    bool terminate() override {
-        return std::chrono::high_resolution_clock::now() >= stopTime;
-    }
-};
-
-CaDiCal_propagator::CaDiCal_propagator(unsigned timeLeft) : m(this), solver(new CaDiCaL::Solver()), terminator(new timeout_terminator(timeLeft)) {
+CaDiCal_propagator::CaDiCal_propagator(unsigned timeLeft) : m(this), solver(new CaDiCaL::Solver()),
+                                                            stopTime(std::chrono::milliseconds(timeLeft) + std::chrono::high_resolution_clock::now()) {
     solver->set("ilb", 0);
     solver->set("ilbassumptions", 0);
-    solver->set("chrono", 0);
+    // solver->set("chrono", 0);
     // solver->set("phase", 0);
-    // solver->set("inprocessing", 0);
+    solver->set("inprocessing", 0);
+    solver->set("lucky", 0);
+    solver->set("walk", 0);
     solver->configure("plain");
-    solver->connect_terminator(terminator);
+    solver->connect_terminator(this);
+    solver->connect_fixed_listener(this);
     solver->connect_external_propagator(this);
+    // are_reasons_forgettable = true;
     reset_names();
 }
 
 CaDiCal_propagator::~CaDiCal_propagator() {
     delete solver;
-    delete terminator;
 }
+
+static unsigned fixedCnt = 0;
 
 void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
     for (int lit : lits) {
@@ -242,8 +249,9 @@ void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
             // ignore tseitin variables or alike
             continue;
 
+        fixedCnt++;
         literal v = m.mk_lit(id);
-        LogN("Fixed: " << literal_to_string(v) << " := " << value << " [" << lit << "]");
+        LogN("Fixed [" << fixedCnt << "]: " << v->to_string() << " := " << value << " [" << lit << "]");
         assert(hard_propagation_read_idx == 0);
         bool prevValue = false;
         if (get_value(v, prevValue)) {
@@ -261,14 +269,27 @@ void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
     }
 }
 
+void CaDiCal_propagator::notify_fixed_assignment(int id) {
+#ifndef NDEBUG
+    if (interesting[abs(id) - 1]) {
+        std::cout << "Permanently fixed " << m.mk_lit(id)->to_string() << " [" << id << "]" << std::endl;
+    }
+#endif
+    literal l = m.mk_lit(id);
+    l->fix(true);
+    l->negate()->fix(false);
+    assert(interpretation[abs(id) - 1] == undef || interpretation[abs(id) - 1] == l->get_fixed());
+}
+
 void CaDiCal_propagator::notify_new_decision_level() {
     assert(hard_propagation_read_idx == 0);
     LogN("Pushed " + to_string(undo_stack_limit.size()));
     decision_level++;
     undo_stack_limit.push_back(undo_stack.size());
 
+    soft_propagation_limit.push_back(pending_soft_propagations.size());
     assert(pending_hard_propagations.size() == pending_hard_propagations_idx);
-    assert(pending_soft_propagations.empty());
+    assert(pending_soft_propagations.size() == soft_propagation_read_idx);
 }
 
 void CaDiCal_propagator::notify_backtrack(size_t new_level) {
@@ -306,11 +327,32 @@ void CaDiCal_propagator::notify_backtrack(size_t new_level) {
 
 bool CaDiCal_propagator::cb_check_found_model(const std::vector<int>& model) {
     assert(hard_propagation_read_idx == 0);
-    assert(soft_propagation_read_idx == pending_soft_propagations.size());
+    if (soft_propagation_read_idx < pending_soft_propagations.size()) {
+        // TODO: Actually, this is a "bug" in CaDiCal...
+        // Either we are done or there is a conflict somewhere => look for it and hard propagate it
+        std::cout << "CaDiCal missed final propagation" << std::endl;
+        unsigned i = soft_propagation_read_idx;
+        for (; i < pending_soft_propagations.size(); i++) {
+            assert(interpretation[abs(pending_soft_propagations[i].second) - 1] != undef);
+            if ((interpretation[abs(pending_soft_propagations[i].second) - 1] == sat) != pending_soft_propagations[i].second > 0)
+                break;
+        }
+        if (i < pending_soft_propagations.size()) {
+            std::cout << "Conflict found - translate it to a hard propagation" << std::endl;
+            std::vector<literal> just;
+            just.reserve(pending_soft_propagations[i].first.size());
+            for (unsigned j = 0; j < pending_soft_propagations[i].first.size() - 1; j++) {
+                just.push_back(m.mk_lit(pending_soft_propagations[i].first[j]));
+            }
+            hard_propagate(just, m.mk_lit(pending_soft_propagations[i].first.back()));
+            return false;
+        }
+        // Fall through
+    }
+    // assert(soft_propagation_read_idx == pending_soft_propagations.size());
     assert(!is_conflict());
     final();
-    return pending_hard_propagations.size() == pending_hard_propagations_idx &&
-            !is_conflict();
+    return pending_hard_propagations.size() == pending_hard_propagations_idx && !is_conflict();
 }
 
 static int invCnt = 0;
@@ -325,7 +367,8 @@ int CaDiCal_propagator::cb_propagate() {
     int ret = prop;
     const unsigned idx = literal_to_idx(ret);
     assert(!just.empty());
-    assert(soft_justifications[idx].empty());
+    assert(ret != 0);
+    assert(soft_justifications[idx].empty() || interpretation[abs(ret) - 1] == (ret > 0 ? sat : unsat));
     soft_justifications[idx] = just;
 #ifdef PUSH_POP
     undo_stack.emplace_back([this, idx](){ soft_justifications[idx].clear(); });
@@ -496,6 +539,10 @@ inline const T& getX(std::vector<T>& vec, unsigned idx) {
 
 literal_term* formula_manager::mk_lit(unsigned v, bool neg) {
     assert(v != 0);
+    /*const auto interpr = propagator->final_interpretation[v - 1];
+    if (interpr != undef) {
+        return (neg ? unsat : sat) == interpr ? (literal_term*)mk_true() : (literal_term*)mk_false();
+    }*/
     literal_term* ret;
     if (neg) {
         ret = getX(neg_cadical_to_formula, v);
@@ -603,16 +650,26 @@ formula_term* formula_manager::mk_and(std::vector<formula_term*> c, bool positiv
 
 formula_manager::formula_manager(CaDiCal_propagator* propagator) : propagator(propagator) {
 #ifndef NDEBUG
-    names.insert(std::make_pair(0, "false"));
+    names.insert(std::make_pair(0, "true"));
 #endif
     trueTerm = new true_term(*this);
+    trueTerm->fix(true);
     falseTerm = new false_term(*this);
+    falseTerm->fix(false);
 }
 
 formula_manager::~formula_manager() {
     for (auto* f: id_to_formula) {
         delete f;
     }
+}
+
+bool formula_manager::is_true(const formula_term* t) const {
+    return t->get_fixed() == sat;
+}
+
+bool formula_manager::is_false(const formula_term* t) const {
+    return t->get_fixed() == unsat;
 }
 
 void formula_manager::register_formula(formula_term* term) {

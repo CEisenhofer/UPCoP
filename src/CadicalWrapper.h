@@ -3,6 +3,8 @@
 #include "cadical.hpp"
 #include "utils.h"
 
+#include <chrono>
+
 #ifndef NDEBUG
 extern std::unordered_map<unsigned, std::string> names;
 inline void reset_names() {
@@ -35,10 +37,6 @@ class and_term;
 class or_term;
 
 typedef literal_term* literal;
-#define literal_to_string(X) (X)->to_string()
-#define literal_to_atom(X) mk_lit(abs((X)->get_lit()))
-#define literal_to_polarity(X) ((bool)((X)->get_lit() > 0))
-#define literal_to_negate(X) mk_lit(-((X)->get_lit()))
 typedef formula_term* formula;
 
 namespace std {
@@ -107,13 +105,9 @@ public:
     formula_manager(CaDiCal_propagator* propagator);
     ~formula_manager();
 
-    bool is_true(const formula_term* t) const {
-        return t == (formula_term*)trueTerm;
-    }
+    bool is_true(const formula_term* t) const;
 
-    bool is_false(const formula_term* t) const {
-        return t == (formula_term*)falseTerm;
-    }
+    bool is_false(const formula_term* t) const;
 
     void register_formula(formula_term* term);
 };
@@ -125,6 +119,7 @@ constexpr bool active = true;
 class formula_term {
 
     const unsigned ast_id;
+    tri_state final_interpretation = undef;
 
 protected:
 
@@ -147,19 +142,28 @@ public:
         return false;
     }
 
-    unsigned get_ast_id() const {
+    inline unsigned get_ast_id() const {
         return ast_id;
     }
 
-    int get_var_id() const {
+    inline int get_var_id() const {
         return var_id;
     }
 
-    bool is_true() const {
+    inline tri_state get_fixed() const {
+        return final_interpretation;
+    }
+
+    inline void fix(bool t) {
+        assert(final_interpretation == undef);
+        final_interpretation = t ? sat : unsat;
+    }
+
+    inline bool is_true() const {
         return manager.is_true(this);
     }
 
-    bool is_false() const {
+    inline bool is_false() const {
         return manager.is_false(this);
     }
 
@@ -194,8 +198,6 @@ public:
         var_id = l;
     }
 
-public:
-
     bool is_literal() const final {
         return true;
     }
@@ -210,32 +212,36 @@ public:
 
     const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) override;
 
-    formula_term* negate() final {
-        assert(false);
-        throw solving_exception("Should not call negate on literals");
+    formula_term* negate() override {
+        return manager.mk_lit(-var_id);
     }
 };
 
-class false_term : public literal_term {
-public:
+struct false_term : public literal_term {
     false_term(formula_manager& m) : literal_term(m, 0, true) {}
 
     std::string to_string() const final { return "false"; }
 
-    const literal_term*
-    get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) final {
+    const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) final {
         return nullptr;
+    }
+
+    formula_term* negate() final {
+        return (formula_term*)manager.mk_true();
     }
 };
 
-class true_term : public literal_term {
-public:
+struct true_term : public literal_term {
     true_term(formula_manager& m) : literal_term(m, 0, false) {}
 
     std::string to_string() const final { return "true"; }
 
     const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) final {
         return nullptr;
+    }
+
+    formula_term* negate() final {
+        return (formula_term*)manager.mk_false();
     }
 };
 
@@ -331,15 +337,9 @@ public:
     }
 };
 
-enum tri_state : unsigned char {
-    undef = 0,
-    sat = 1,
-    unsat = 2,
-};
-
 typedef std::function<void()> action;
 
-class CaDiCal_propagator : public CaDiCaL::ExternalPropagator {
+class CaDiCal_propagator : public CaDiCaL::ExternalPropagator, public CaDiCaL::Terminator, public CaDiCaL::FixedAssignmentListener {
     friend class formula_manager;
 
 protected:
@@ -350,6 +350,9 @@ protected:
 #endif
 
 private:
+
+    decltype(std::chrono::high_resolution_clock::now()) stopTime;
+
     int var_cnt = 0;
     std::vector<unsigned> undo_stack_limit;
     unsigned decision_level = 0;
@@ -384,7 +387,6 @@ public:
     }
 
     CaDiCaL::Solver* solver = nullptr;
-    CaDiCaL::Terminator* terminator = nullptr;
     formula_manager m;
 
     inline void add_undo(const action& action) {
@@ -504,6 +506,12 @@ protected:
     virtual void fixed(literal lit, bool value) = 0;
 
     void notify_assignment(const vector<int>& lits) final;
+
+    void notify_fixed_assignment(int id) final;
+
+    bool terminate() override {
+        return std::chrono::high_resolution_clock::now() >= stopTime;
+    }
 
     void notify_new_decision_level() final;
 
