@@ -111,7 +111,8 @@ void CaDiCal_propagator::propagate_conflict(const std::vector<literal>& just) {
 bool CaDiCal_propagator::hard_propagate(const std::vector<literal>& just, formula prop) {
     if (is_conflict_flag)
         return false;
-    assert(!prop->is_true());
+    if (prop->is_true())
+        return true;
     if (prop->is_false()) {
         propagate_conflict(just);
         return false;
@@ -273,7 +274,7 @@ void CaDiCal_propagator::notify_fixed_assignment(int id) {
 #ifndef NDEBUG
     assert(id != 0);
     if (interesting[abs(id) - 1]) {
-        std::cout << "Permanently fixed " << m.mk_lit(id)->to_string() << " [" << id << "]" << std::endl;
+        LogN("Permanently fixed " << m.mk_lit(id)->to_string() << " [" << id << "]");
     }
 #endif
     literal l = m.mk_lit(id);
