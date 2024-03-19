@@ -279,6 +279,8 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
     int timeLeft = progParams.Timeout == 0 ? INT_MAX : progParams.Timeout;
     auto* propagator = new matrix_propagator(cnf, adtSolver, progParams, literalCnt, (unsigned)timeLeft);
 
+    auto program_start = std::chrono::high_resolution_clock::now();;
+
     for (unsigned id = progParams.Depth; id < progParams.MaxDepth; id++) {
         start_watch();
         // TODO
@@ -372,6 +374,8 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
                      << interpretation->t->pretty_print(interpretation->cpy_idx(), &prettyNames) << '\n';
         }
 
+        auto program_end = std::chrono::high_resolution_clock::now();;
+        cout << "Found proof in " << std::chrono::duration_cast<std::chrono::milliseconds>(program_end - program_start).count() << "ms" << endl;
         cout << "Usage statistics:" << std::endl;
         std::vector<std::pair<unsigned, int>> sortedUsed = to_sorted_vector(usedClauses);
         for (auto& sorted : sortedUsed) {
