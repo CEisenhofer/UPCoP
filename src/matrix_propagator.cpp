@@ -1,5 +1,8 @@
 ﻿#include "matrix_propagator.h"
 
+constexpr unsigned MAX_FINAL_STEPS = 10000;
+constexpr unsigned MAX_FINAL_PATHS = 1;
+
 matrix_propagator::matrix_propagator(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt, unsigned timeLeft) :
         propagator_base(cnf, adtSolver, progParams, literalCnt, timeLeft), lvl(progParams.Depth) {
 
@@ -145,8 +148,8 @@ clause_instance* matrix_propagator::create_clause_instance(const indexed_clause*
     return new clause_instance(clause, cpyIdx, selector, std::move(instances));
 }
 
-bool matrix_propagator::are_connected(const ground_literal& l1, const ground_literal& l2) {
-    if (l1.lit->polarity == l2.lit->polarity || l1.arity() != l2.arity())
+bool matrix_propagator::are_same_atom(const ground_literal& l1, const ground_literal& l2) {
+    if (l1.arity() != l2.arity())
         return false;
     const auto* unification = cache_unification(l1, l2);
     assert(unification != nullptr);
@@ -156,6 +159,7 @@ bool matrix_propagator::are_connected(const ground_literal& l1, const ground_lit
     assert(res == unificationHints.get(l2.lit->Index, l1.lit->Index)->IsSatisfied(*this, l2, l1));
     return res;
 }
+
 
 void matrix_propagator::check_proof(z3::context& ctx) {
     if (!progParams.CheckProof)
@@ -535,6 +539,8 @@ void matrix_propagator::final() {
         // Used for unsat core minimization - this is a senseless state anyway...
         return;
 
+    finalCnt++;
+
     start_watch(final_time);
     assert(!chosen.empty());
 
@@ -572,13 +578,16 @@ void matrix_propagator::final() {
     assert(progParams.Mode != Rectangle || chosen.size() == lvl);
 
     vector<vector<path_element>> paths;
-    LogN("Final (" << ++finalCnt << ")");
+    LogN("Final (" << finalCnt << ")");
     vector<clause_instance*> shuffledChosen(chosen);
     Shuffle(shuffledChosen);
-    const int limit = 1;
 
     vector<path_element> current_path;
-    find_path(0, shuffledChosen, current_path, paths, limit);
+    unsigned steps = 0;
+    find_path(0, shuffledChosen, current_path, paths, steps);
+    if (paths.empty() && steps >= MAX_FINAL_STEPS) {
+        find_path_sat(shuffledChosen, paths);
+    }
     if (paths.empty())
         return;
 #ifdef DEBUG
@@ -646,8 +655,7 @@ void matrix_propagator::final() {
     }
 }
 
-void matrix_propagator::find_path(int clauseIdx, const vector<clause_instance*>& clauses, vector<path_element>& path,
-                                  vector<vector<path_element>>& foundPaths, int limit) {
+void matrix_propagator::find_path(int clauseIdx, const vector<clause_instance*>& clauses, vector<path_element>& path, vector<vector<path_element>>& foundPaths, unsigned& steps) {
     if (clauseIdx >= clauses.size()) {
         foundPaths.push_back(path);
 #ifndef NDEBUG
@@ -685,11 +693,67 @@ void matrix_propagator::find_path(int clauseIdx, const vector<clause_instance*>&
             continue;
 
         path.emplace_back(*info->clause, info->copyIdx, l1);
-        find_path(clauseIdx + 1, clauses, path, foundPaths, limit);
-        if (foundPaths.size() >= limit)
+        steps++;
+        find_path(clauseIdx + 1, clauses, path, foundPaths, steps);
+        if (foundPaths.size() >= MAX_FINAL_PATHS)
+            return;
+        if (steps >= MAX_FINAL_STEPS)
             return;
         path.pop_back();
     }
+}
+
+void matrix_propagator::find_path_sat(const vector<clause_instance*>& clauses, vector<vector<path_element>>& foundPaths) {
+    vector<ground_literal> literals;
+    vector<vector<int>> sat_clauses;
+    CaDiCaL::Solver subsolver;
+    do {
+        for (clause_instance* cl : clauses) {
+            sat_clauses.emplace_back();
+            sat_clauses.back().reserve(cl->literals.size());
+            for (auto lit : cl->literals) {
+
+                int i = 0;
+                for (; i < literals.size(); i++) {
+                    if (are_same_atom(lit, literals[i]))
+                        break;
+                }
+                if (i >= literals.size())
+                    literals.push_back(lit);
+                int sat_lit = (i + 1) * (lit.lit->polarity ? 1 : -1);
+                sat_clauses.back().push_back(sat_lit);
+                subsolver.add(sat_lit);
+            }
+            subsolver.add(0);
+        }
+        int res = subsolver.solve();
+        if (res == 20)
+            return;
+
+        foundPaths.emplace_back();
+        foundPaths.back().reserve(clauses.size());
+        vector<int> newClause;
+        newClause.reserve(clauses.size());
+
+        for (unsigned i = 0; i < clauses.size(); i++) {
+            unsigned j = 0;
+            for (; j < clauses[i]->literals.size(); j++) {
+                int val = subsolver.val(abs(sat_clauses[i][j]));
+                if (val == sat_clauses[i][j]) {
+                    foundPaths.back().emplace_back(*clauses[i]->clause, clauses[i]->copyIdx, clauses[i]->literals[j]);
+                    newClause.push_back(-sat_clauses[i][j]);
+                    break;
+                }
+            }
+            assert(j < clauses[i]->literals.size());
+        }
+
+        for (int lit : newClause) {
+            subsolver.add(lit);
+        }
+        subsolver.add(0);
+
+    } while (foundPaths.size() < MAX_FINAL_PATHS);
 }
 
 literal matrix_propagator::decide() {

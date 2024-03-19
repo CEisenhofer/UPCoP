@@ -381,6 +381,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         cout << "               tautology generation: " << get_total_time(tautology_time) << "ms" << endl;
         cout << "               var order generation: " << get_total_time(var_order_time) << "ms" << endl;
         cout << "               final reasoning:      " << get_total_time(final_time) << "ms" << endl;
+        cout << "Final counts: " << propagator->get_final_cnt() << endl;
         cout << "Usage statistics:" << std::endl;
         std::vector<std::pair<unsigned, int>> sortedUsed = to_sorted_vector(usedClauses);
         for (auto& sorted : sortedUsed) {

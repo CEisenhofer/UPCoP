@@ -22,6 +22,12 @@ struct clause_instance {
     vector<equality> delayedRelevantFalse;
     vector<less_than> delayedRelevantLess;
 
+    // for reachability
+    clause_instance* parent;
+    clause_instance* prev_sibling;
+    clause_instance* next_sibling;
+    unsigned cnt = 1;
+
     clause_instance() = delete;
     clause_instance(clause_instance& other) = delete;
     auto operator=(clause_instance& other) = delete;
@@ -32,6 +38,46 @@ struct clause_instance {
             propagated(false),
 #endif
             value(undef), literals(std::move(literals)) { }
+
+    inline clause_instance* find_root(propagator_base& propagator) {
+        clause_instance* current = this;
+        while (current != current->parent) {
+            current = current->parent;
+        }
+        if (current == parent)
+            return current;
+
+        auto* prev = parent;
+        propagator.add_undo([this, prev]() { parent = prev; });
+        parent = current;
+        return current;
+    }
+
+    void merge_root(clause_instance* b, clause_instance* newRoot, propagator_base& propagator) {
+        unsigned prevCnt = newRoot->cnt;
+
+        auto* p = newRoot->prev_sibling;
+        auto* n = b->next_sibling;
+
+        b->next_sibling = newRoot;
+        newRoot->prev_sibling = b;
+
+        p->next_sibling = n;
+        n->prev_sibling = p;
+
+        propagator.add_undo([b, newRoot, p, n, prevCnt]() {
+            b->parent = b;
+            newRoot->cnt = prevCnt;
+
+            newRoot->prev_sibling = p;
+            p->next_sibling = newRoot;
+
+            b->next_sibling = n;
+            n->prev_sibling = b;
+        });
+        b->parent = newRoot;
+        newRoot->cnt += b->cnt;
+    }
 
     string to_string() const { return std::to_string(copyIdx + 1) + ". copy of clause #" + std::to_string(clause->Index); }
 };
@@ -80,6 +126,10 @@ public:
         return false;
     }
 
+    inline unsigned get_final_cnt() const {
+        return finalCnt;
+    }
+
 private:
 
     void create_instances();
@@ -90,7 +140,11 @@ public:
 
     clause_instance* create_clause_instance(const indexed_clause* clause, unsigned cpyIdx, literal selector);
 
-    bool are_connected(const ground_literal& l1, const ground_literal& l2);
+    bool are_same_atom(const ground_literal& l1, const ground_literal& l2);
+
+    bool are_connected(const ground_literal& l1, const ground_literal& l2) {
+        return l1.lit->polarity != l2.lit->polarity && are_same_atom(l1, l2);
+    }
 
     void check_proof(z3::context& ctx);
 
@@ -120,7 +174,9 @@ public:
 
     literal decide() override;
 
-    void find_path(int clauseIdx, const vector<clause_instance*>& clauses, vector<path_element>& path, vector<vector<path_element>>& foundPaths, int limit);
+    void find_path(int clauseIdx, const vector<clause_instance*>& clauses, vector<path_element>& path, vector<vector<path_element>>& foundPaths, unsigned& steps);
+
+    void find_path_sat(const vector<clause_instance*>& clauses, vector<vector<path_element>>& foundPaths);
 
     void print_proof(z3::solver& uniSolver, unordered_map<term_instance*, string>& prettyNames, unordered_map<unsigned, int>& usedClauses) {
         int clauseCnt = 1;
