@@ -271,6 +271,7 @@ void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
 
 void CaDiCal_propagator::notify_fixed_assignment(int id) {
 #ifndef NDEBUG
+    assert(id != 0);
     if (interesting[abs(id) - 1]) {
         std::cout << "Permanently fixed " << m.mk_lit(id)->to_string() << " [" << id << "]" << std::endl;
     }
@@ -278,7 +279,7 @@ void CaDiCal_propagator::notify_fixed_assignment(int id) {
     literal l = m.mk_lit(id);
     l->fix(true);
     l->negate()->fix(false);
-    assert(interpretation[abs(id) - 1] == undef || interpretation[abs(id) - 1] == l->get_fixed());
+    assert(interpretation[abs(id) - 1] == undef || interpretation[abs(id) - 1] == id > 0 ? sat : unsat);
 }
 
 void CaDiCal_propagator::notify_new_decision_level() {
