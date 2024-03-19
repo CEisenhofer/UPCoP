@@ -104,7 +104,11 @@ public:
 
     bool propagate_rules(literal e, clause_instance* info) {
         for (const auto& lit : info->literals) {
-            if (!hard_propagate({ e }, connect_literal(info, lit)))
+            formula condition = connect_literal(info, lit);
+            [[unlikely]]
+            if (condition->is_true())
+                continue;
+            if (!hard_propagate({ e }, condition))
                 return false;
         }
         return true;

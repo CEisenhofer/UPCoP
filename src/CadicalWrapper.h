@@ -105,10 +105,6 @@ public:
     formula_manager(CaDiCal_propagator* propagator);
     ~formula_manager();
 
-    bool is_true(const formula_term* t) const;
-
-    bool is_false(const formula_term* t) const;
-
     void register_formula(formula_term* term);
 };
 
@@ -160,11 +156,11 @@ public:
     }
 
     inline bool is_true() const {
-        return manager.is_true(this);
+        return final_interpretation == sat;
     }
 
     inline bool is_false() const {
-        return manager.is_false(this);
+        return final_interpretation == unsat;
     }
 
     virtual std::string to_string() const = 0;

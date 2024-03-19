@@ -665,14 +665,6 @@ formula_manager::~formula_manager() {
     }
 }
 
-bool formula_manager::is_true(const formula_term* t) const {
-    return t->get_fixed() == sat;
-}
-
-bool formula_manager::is_false(const formula_term* t) const {
-    return t->get_fixed() == unsat;
-}
-
 void formula_manager::register_formula(formula_term* term) {
     id_to_formula.push_back(term);
 }

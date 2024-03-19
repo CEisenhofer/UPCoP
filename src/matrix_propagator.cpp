@@ -488,7 +488,12 @@ formula_term* matrix_propagator::connect_literal(clause_instance* info, const gr
                     continue; // We don't want to connect to itself...
                 vector<formula> constraints = { cachedClause[k]->selector };
                 unification->GetPosConstraints(*this, lit, cachedClause[k]->literals[j], constraints);
-                exprs.push_back(m.mk_and(constraints));
+                formula conj = m.mk_and(constraints);
+                [[unlikely]]
+                if (conj->is_true()) {
+                    return m.mk_true();
+                }
+                exprs.push_back(conj);
             }
         }
     }
