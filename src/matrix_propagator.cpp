@@ -148,7 +148,7 @@ clause_instance* matrix_propagator::create_clause_instance(const indexed_clause*
 bool matrix_propagator::are_connected(const ground_literal& l1, const ground_literal& l2) {
     if (l1.lit->polarity == l2.lit->polarity || l1.arity() != l2.arity())
         return false;
-    const auto* unification = unificationHints.get(l1.lit->Index, l2.lit->Index);
+    const auto* unification = cache_unification(l1, l2);
     assert(unification != nullptr);
     if (large_array::is_invalid(unification))
         return false;
@@ -258,6 +258,7 @@ void matrix_propagator::pb_clause_limit() {
     if (progParams.Mode != Rectangle || pbPropagated)
         return;
 
+    start_watch(pb_time);
     static vector<literal> just;
     static vector<literal> prop;
 
@@ -307,6 +308,7 @@ void matrix_propagator::pb_clause_limit() {
                 return;
         }
     }
+    stop_watch(pb_time);
 }
 
 void matrix_propagator::fixed(literal_term* e, bool value) {
@@ -357,6 +359,7 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
 #ifndef PUSH_POP
             if (!info->propagated) {
 #endif
+                start_watch(var_order_time);
                 stack<less_than> stack;
                 for (unsigned i = info->clause->variables.size(); i > 0; i--) {
                     term* var = info->clause->variables[i - 1];
@@ -370,6 +373,7 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
                 assert(!eq);
                 formula expr = term_solver.make_less_expr(subproblems, eq);
                 hard_propagate({ e }, expr);
+                stop_watch(var_order_time);
 #ifndef PUSH_POP
             }
 #endif
@@ -424,6 +428,7 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
 #ifndef PUSH_POP
         if (!info->propagated) {
 #endif
+            start_watch(tautology_time);
             // Tautology elimination
             for (int k = 0; k < info->literals.size(); k++) {
                 for (int l = k + 1; l < info->literals.size(); l++) {
@@ -446,6 +451,7 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
                     }
                 }
             }
+            stop_watch(tautology_time);
 
             if (!propagate_rules(e, info))
                 return;
@@ -473,10 +479,7 @@ formula_term* matrix_propagator::connect_literal(clause_instance* info, const gr
         unsigned literalCnt = cachedClause[0]->literals.size();
         for (int j = 0; j < literalCnt; j++) {
             // TODO: Only iterate over the relevant ones
-            cache_unification(lit, cachedClause[0]->literals[j]);
-            const subterm_hint* unification = unificationHints.get(
-                    lit.lit->Index,
-                    cachedClause[0]->literals[j].lit->Index);
+            const subterm_hint* unification = cache_unification(lit, cachedClause[0]->literals[j]);
 
             if (large_array::is_invalid(unification) ||
                 lit.lit->polarity == cachedClause[0]->literals[j].lit->polarity)
@@ -501,8 +504,7 @@ formula_term* matrix_propagator::connect_literal(clause_instance* info, const gr
     if (progParams.Mode == Core) {
         for (int i = 0; i < matrix.size(); i++) {
             for (int j = 0; j < matrix[i]->size(); j++) {
-                cache_unification(lit, *matrix[i]->literals[j]);
-                const subterm_hint* unification = unificationHints.get(lit.lit->Index, matrix[i]->literals[j]->Index);
+                const subterm_hint* unification = cache_unification(lit, *matrix[i]->literals[j]);
                 if (large_array::is_invalid(unification) || lit.lit->polarity == matrix[i]->literals[j]->polarity)
                     continue;
                 if (!cachedClauses[i].empty() && matrix[i]->Ground) {
@@ -533,7 +535,9 @@ void matrix_propagator::final() {
         // Used for unsat core minimization - this is a senseless state anyway...
         return;
 
+    start_watch(final_time);
     assert(!chosen.empty());
+
     if (progParams.Mode == Rectangle && chosen.size() != lvl) {
         if (chosen.size() < lvl) {
             for (auto* clause : allClauses) {
@@ -609,10 +613,8 @@ void matrix_propagator::final() {
                     indexed_clause* cl = matrix[i];
                     unsigned literalCnt = cl->literals.size();
                     for (int j = 0; j < literalCnt; j++) {
-                        cache_unification(elem.lit, *(cl->literals[j]));
-                        const subterm_hint* unification = unificationHints.get(
-                                elem.lit.lit->Index,
-                                cl->literals[j]->Index);
+
+                        const subterm_hint* unification = cache_unification(elem.lit, *(cl->literals[j]));
 
                         if (large_array::is_invalid(unification) ||
                             elem.lit.lit->polarity == cl->literals[j]->polarity)

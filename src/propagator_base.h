@@ -119,9 +119,9 @@ protected:
 
 public:
 
-    void cache_unification(const ground_literal& l1, const indexed_literal& l2);
+    const subterm_hint* cache_unification(const ground_literal& l1, const indexed_literal& l2);
 
-    inline void cache_unification(const ground_literal& l1, const ground_literal& l2) {
+    inline const subterm_hint* cache_unification(const ground_literal& l1, const ground_literal& l2) {
         return cache_unification(l1, *l2.lit);
     }
 

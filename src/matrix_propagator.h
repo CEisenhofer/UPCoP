@@ -103,10 +103,14 @@ public:
     void fixed(literal e, bool value) override;
 
     bool propagate_rules(literal e, clause_instance* info) {
+        start_watch(connect_time);
         for (const auto& lit : info->literals) {
-            if (!hard_propagate({ e }, connect_literal(info, lit)))
+            if (!hard_propagate({ e }, connect_literal(info, lit))) {
+                stop_watch(connect_time);
                 return false;
+            }
         }
+        stop_watch(connect_time);
         return true;
     }
 

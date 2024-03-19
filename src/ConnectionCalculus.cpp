@@ -169,6 +169,8 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
 #endif
     }
 
+    start_watch(overall_time);
+
     z3::context context;
     z3::expr_vector assertions(context);
     try {
@@ -276,13 +278,11 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
     if (progParams.CheckProof)
         adtSolver.make_z3_adt(context);
 
-    int timeLeft = progParams.Timeout == 0 ? INT_MAX : progParams.Timeout;
+    int64_t timeLeft = progParams.Timeout == 0 ? INT_MAX : progParams.Timeout;
     auto* propagator = new matrix_propagator(cnf, adtSolver, progParams, literalCnt, (unsigned)timeLeft);
 
-    auto program_start = std::chrono::high_resolution_clock::now();;
-
     for (unsigned id = progParams.Depth; id < progParams.MaxDepth; id++) {
-        start_watch();
+        start_watch(level_time);
         // TODO
         // parameters.set("smt.restart_factor", 1.0);
         // parameters.set("random_seed", 1u);
@@ -312,7 +312,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         if (res != sat) {
             if (!silent)
                 cout << "Failed with depth " << id << endl;
-            timeLeft -= (int)stop_watch();
+            timeLeft -= stop_watch(level_time);
             if (timeLeft <= 0) {
                 if (!silent)
                     cout << "Timeout" << endl;
@@ -374,8 +374,13 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
                      << interpretation->t->pretty_print(interpretation->cpy_idx(), &prettyNames) << '\n';
         }
 
-        auto program_end = std::chrono::high_resolution_clock::now();;
-        cout << "Found proof in " << std::chrono::duration_cast<std::chrono::milliseconds>(program_end - program_start).count() << "ms" << endl;
+        cout << "Found proof in " << stop_watch(overall_time) << "ms" << endl;
+        cout << "Time spend for connection reasoning: " << get_total_time(term_time) << "ms" << endl;
+        cout << "               term reasoning:       " << get_total_time(connect_time) << "ms" << endl;
+        cout << "               pb reasoning:         " << get_total_time(pb_time) << "ms" << endl;
+        cout << "               tautology generation: " << get_total_time(tautology_time) << "ms" << endl;
+        cout << "               var order generation: " << get_total_time(var_order_time) << "ms" << endl;
+        cout << "               final reasoning:      " << get_total_time(final_time) << "ms" << endl;
         cout << "Usage statistics:" << std::endl;
         std::vector<std::pair<unsigned, int>> sortedUsed = to_sorted_vector(usedClauses);
         for (auto& sorted : sortedUsed) {

@@ -123,20 +123,29 @@ bool complex_adt_solver::asserted(literal e, bool isTrue) {
 
 bool complex_adt_solver::asserted_eq(literal e, term_instance* lhs, term_instance* rhs, bool isTrue) const {
     assert(&lhs->t->Solver == &rhs->t->Solver);
+    bool res;
+    start_watch(term_time);
     if (propagator().is_adt_split()) {
-        return isTrue
+        res = isTrue
                ? //lhs->t->Solver.unify_split(e, lhs, rhs)
                lhs->t->Solver.unify(e, lhs, rhs)
                : lhs->t->Solver.non_unify_split(prop->m.mk_not(e), lhs, rhs);
     }
-    return isTrue
-           ? lhs->t->Solver.unify(e, lhs, rhs)
-           : lhs->t->Solver.non_unify(prop->m.mk_not(e), lhs, rhs);
+    else {
+        res = isTrue
+              ? lhs->t->Solver.unify(e, lhs, rhs)
+              : lhs->t->Solver.non_unify(prop->m.mk_not(e), lhs, rhs);
+    }
+    stop_watch(term_time);
+    return res;
 }
 
 bool complex_adt_solver::asserted_less(literal e, term_instance* lhs, term_instance* rhs) const {
     assert(&lhs->t->Solver == &rhs->t->Solver);
-    return lhs->t->Solver.less(e, lhs, rhs);
+    start_watch(term_time);
+    bool res = lhs->t->Solver.less(e, lhs, rhs);
+    stop_watch(term_time);
+    return res;
 }
 
 bool complex_adt_solver::contains_cycle(term_instance* t, term_instance* c) const {

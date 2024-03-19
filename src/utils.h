@@ -52,8 +52,21 @@ inline bool to_int(char* c, int& ret) {
     return true;
 }
 
-void start_watch();
-uint64_t stop_watch();
+enum stopwatch_idx : unsigned char {
+    level_time = 0,
+    connect_time = 1,
+    term_time = 2,
+    pb_time = 3,
+    tautology_time = 4,
+    var_order_time = 5,
+    final_time = 6,
+    overall_time = 7,
+    max_stopwatch_idx = overall_time,
+};
+
+void start_watch(stopwatch_idx);
+uint64_t stop_watch(stopwatch_idx);
+uint64_t get_total_time(stopwatch_idx);
 
 template<typename T, typename S, typename hash, typename eq>
 inline vector<pair<T, S>> to_sorted_vector(const unordered_map<T, S, hash, eq>& map) {
