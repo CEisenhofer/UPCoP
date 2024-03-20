@@ -246,10 +246,6 @@ void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
         bool value = lit > 0;
 
         const unsigned id = abs(lit);
-        if (!interesting[id - 1])
-            // ignore tseitin variables or alike
-            continue;
-
         fixedCnt++;
         literal v = m.mk_lit(id);
         LogN("Fixed [" << fixedCnt << "]: " << v->to_string() << " := " << value << " [" << lit << "]");
@@ -273,7 +269,7 @@ void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
 void CaDiCal_propagator::notify_fixed_assignment(int id) {
 #ifndef NDEBUG
     assert(id != 0);
-    if (interesting[abs(id) - 1]) {
+    if (interpreted[abs(id) - 1]) {
         LogN("Permanently fixed " << m.mk_lit(id)->to_string() << " [" << id << "]");
     }
 #endif
@@ -458,8 +454,13 @@ const literal_term* not_term::get_lits(CaDiCal_propagator& propagator, std::vect
 const literal_term* and_term::get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) {
     if (var_id == 0)
         var_id = propagator.new_var(OPT("<" + to_string() + ">"));
-    else if (active)
-        return manager.mk_lit(var_id);
+    else if (active) {
+        literal lit = manager.mk_lit(var_id);
+        // assert(connections.empty());
+        add_range(lit->connections, connections);
+        connections.clear();
+        return lit;
+    }
     else
         propagator.observe_again(var_id);
 #ifdef PUSH_POP
@@ -485,14 +486,22 @@ const literal_term* and_term::get_lits(CaDiCal_propagator& propagator, std::vect
         }
         aux.emplace_back(std::move(prop));
     }
-    return manager.mk_lit(var_id);
+    literal lit = manager.mk_lit(var_id);
+    add_range(lit->connections, connections);
+    connections.clear();
+    return lit;
 }
 
 const literal_term* or_term::get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) {
     if (var_id == 0)
         var_id = propagator.new_var(OPT("<" + to_string() + ">"));
-    else if (active)
-        return manager.mk_lit(var_id);
+    else if (active) {
+        literal lit = manager.mk_lit(var_id);
+        assert(connections.empty());
+        add_range(lit->connections, connections);
+        connections.clear();
+        return lit;
+    }
     else
         propagator.observe_again(var_id);
 #ifdef PUSH_POP
@@ -518,7 +527,10 @@ const literal_term* or_term::get_lits(CaDiCal_propagator& propagator, std::vecto
         prop.push_back(arg);
     }
     aux.emplace_back(std::move(prop));
-    return manager.mk_lit(var_id);
+    literal lit = manager.mk_lit(var_id);
+    add_range(lit->connections, connections);
+    connections.clear();
+    return lit;
 }
 
 true_term* formula_manager::mk_true() const {

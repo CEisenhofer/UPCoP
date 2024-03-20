@@ -26,7 +26,6 @@ struct clause_instance {
     clause_instance* parent;
     clause_instance* prev_sibling;
     clause_instance* next_sibling;
-    unsigned cnt = 1;
 
     clause_instance() = delete;
     clause_instance(clause_instance& other) = delete;
@@ -37,7 +36,12 @@ struct clause_instance {
 #ifndef PUSH_POP
             propagated(false),
 #endif
-            value(undef), literals(std::move(literals)) { }
+            value(undef), literals(std::move(literals)),
+            parent(this), prev_sibling(this), next_sibling(this) { }
+
+    inline bool is_root() const {
+        return parent == this;
+    }
 
     inline clause_instance* find_root(propagator_base& propagator) {
         clause_instance* current = this;
@@ -53,8 +57,12 @@ struct clause_instance {
         return current;
     }
 
-    void merge_root(clause_instance* b, clause_instance* newRoot, propagator_base& propagator) {
-        unsigned prevCnt = newRoot->cnt;
+    static void merge_root(clause_instance* b, clause_instance* newRoot, propagator_base& propagator) {
+        assert(b->is_root());
+        assert(newRoot->is_root());
+
+        if (b == newRoot)
+            return;
 
         auto* p = newRoot->prev_sibling;
         auto* n = b->next_sibling;
@@ -65,9 +73,8 @@ struct clause_instance {
         p->next_sibling = n;
         n->prev_sibling = p;
 
-        propagator.add_undo([b, newRoot, p, n, prevCnt]() {
+        propagator.add_undo([b, newRoot, p, n]() {
             b->parent = b;
-            newRoot->cnt = prevCnt;
 
             newRoot->prev_sibling = p;
             p->next_sibling = newRoot;
@@ -76,7 +83,6 @@ struct clause_instance {
             n->prev_sibling = b;
         });
         b->parent = newRoot;
-        newRoot->cnt += b->cnt;
     }
 
     string to_string() const { return std::to_string(copyIdx + 1) + ". copy of clause #" + std::to_string(clause->Index); }
@@ -105,11 +111,7 @@ class matrix_propagator : public propagator_base {
 public:
     matrix_propagator(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt, unsigned timeLeft);
 
-    ~matrix_propagator() override {
-        for (auto& clause : allClauses) {
-            delete clause;
-        }
-    }
+    ~matrix_propagator() override;
 
     bool next_level() {
         progParams.Depth = lvl + 1;
@@ -159,7 +161,7 @@ public:
     bool propagate_rules(literal e, clause_instance* info) {
         start_watch(connect_time);
         for (const auto& lit : info->literals) {
-            if (!hard_propagate({ e }, connect_literal(info, lit))) {
+            if (!hard_propagate({ e }, connect_literal(e, info, lit))) {
                 stop_watch(connect_time);
                 return false;
             }
@@ -168,7 +170,7 @@ public:
         return true;
     }
 
-    formula connect_literal(clause_instance* info, const ground_literal& lit);
+    formula connect_literal(literal just, clause_instance* info, const ground_literal& lit);
 
     void final() override;
 
@@ -178,7 +180,7 @@ public:
 
     void find_path_sat(const vector<clause_instance*>& clauses, vector<vector<path_element>>& foundPaths);
 
-    void print_proof(z3::solver& uniSolver, unordered_map<term_instance*, string>& prettyNames, unordered_map<unsigned, int>& usedClauses) {
+    void print_proof(unordered_map<term_instance*, string>& prettyNames, unordered_map<unsigned, int>& usedClauses) {
         int clauseCnt = 1;
         unordered_map<clause_instance*, int> clauseToCnt;
         sort(chosen.begin(), chosen.end(), [](const clause_instance* c1, const clause_instance* c2) {

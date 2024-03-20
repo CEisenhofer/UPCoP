@@ -327,6 +327,11 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
             }
             if (timeLeft < 1000 * 60 * 60 * 24)
                 cout << "Time left: " << timeLeft << "ms" << endl;
+
+            int* arr = new int[100000];
+            delete[] arr;
+            new int[100000];
+
             if (propagator->next_level()) {
                 if (!silent)
                     cout << "SAT because of exhaustion" << endl;
@@ -334,6 +339,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
                 delete propagator;
                 return sat;
             }
+            new int[1000];
             delete propagator;
             propagator = new matrix_propagator(cnf, adtSolver, progParams, literalCnt, timeLeft);
             continue;
@@ -351,7 +357,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         }
 
         z3::solver subsolver(context);
-        propagator->print_proof(subsolver, prettyNames, usedClauses);
+        propagator->print_proof(prettyNames, usedClauses);
 
         auto sortedPrettyNames =
                 to_sorted_vector(prettyNames,

@@ -112,6 +112,8 @@ public:
 constexpr bool active = true;
 #endif
 
+struct clause_instance;
+
 class formula_term {
 
     const unsigned ast_id;
@@ -131,6 +133,14 @@ protected:
     }
 
 public:
+
+    struct connection_tseitin {
+        literal sideCondition;
+        clause_instance* c1;
+        clause_instance* c2;
+    };
+
+    vector<connection_tseitin> connections; // If true: The two clauses are linked (because of root simplifications, a single formula can link more two clauses)
 
     virtual ~formula_term() = default;
 
@@ -364,7 +374,6 @@ private:
     unsigned soft_propagation_read_idx = 0;
 
     std::vector<tri_state> interpretation;
-    std::vector<bool> interesting;
 
     // for persistent propagation
     std::unordered_set<std::vector<int>> prev_propagations;
@@ -374,6 +383,8 @@ private:
     }
 
 protected:
+    std::vector<bool> interpreted;
+
     bool is_conflict_flag = false;
 
 public:
@@ -451,7 +462,7 @@ protected:
         soft_justifications.emplace_back();
         assert(2 * var_cnt == soft_justifications.size());
         interpretation.push_back(undef);
-        interesting.push_back(is_interesting);
+        interpreted.push_back(is_interesting);
         assert(var_cnt == interpretation.size());
         return newId;
     }

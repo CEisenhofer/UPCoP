@@ -31,6 +31,12 @@ matrix_propagator::matrix_propagator(cnf<indexed_clause*>& cnf, complex_adt_solv
     }
 }
 
+matrix_propagator::~matrix_propagator() {
+    for (auto& clause : allClauses) {
+        delete clause;
+    }
+}
+
 void matrix_propagator::create_instances() {
     for (unsigned i = 0; i < progParams.multiplicity.size(); i++) {
         assert(progParams.multiplicity[i] <= 1 || !matrix[i]->Ground);
@@ -51,7 +57,7 @@ bool matrix_propagator::next_level_core() {
     bool unsat = true;
 
     for (unsigned i = 0; i < clauseLimitListExpr.size(); i++) {
-        if (!clauseLimitListExpr[i]->is_true())
+        if (clauseLimitListExpr[i] != m.mk_true())
             unknown.push_back(i);
     }
 
@@ -65,7 +71,7 @@ bool matrix_propagator::next_level_core() {
                 assert(!clauseLimitListExpr[c]->is_true());
                 if (!solver->failed(clauseLimitListExpr[c]->get_lit())) {
                     notFailed.push_back(c);
-                    std::swap(unknown[c], unknown.back());
+                    std::swap(unknown[j - 1], unknown.back());
                     unknown.pop_back();
                 }
             }
@@ -319,6 +325,19 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
     if (is_conflict_flag)
         return;
     try {
+
+        if (value) {
+            for (const auto& [just, c1, c2] : e->connections) {
+                bool val = false;
+                if (get_value(just, val) && val) {
+                    clause_instance::merge_root(c1->find_root(*this), c2->find_root(*this), *this);
+                }
+            }
+        }
+
+        if (!interpreted[abs(e->get_lit()) - 1])
+            return;
+
         if (term_solver.asserted(e, value))
             return;
 
@@ -473,7 +492,7 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
     }
 }
 
-formula_term* matrix_propagator::connect_literal(clause_instance* info, const ground_literal& lit) {
+formula_term* matrix_propagator::connect_literal(literal just, clause_instance* info, const ground_literal& lit) {
     // TODO: Only propagate the 0th copy if the clause is ground
     vector<formula> exprs;
     for (auto& cachedClause : cachedClauses) {
@@ -497,9 +516,13 @@ formula_term* matrix_propagator::connect_literal(clause_instance* info, const gr
                 unification->GetPosConstraints(*this, lit, cachedClause[k]->literals[j], constraints);
                 formula conj = m.mk_and(constraints);
                 [[unlikely]]
-                if (conj->is_true()) {
+                if (conj->is_true())
                     return m.mk_true();
-                }
+                formula_term::connection_tseitin connectionTseitin;
+                connectionTseitin.sideCondition = just;
+                connectionTseitin.c1 = info;
+                connectionTseitin.c2 = cachedClause[k];
+                conj->connections.push_back(connectionTseitin);
                 exprs.push_back(conj);
             }
         }
@@ -577,30 +600,77 @@ void matrix_propagator::final() {
     }
     assert(progParams.Mode != Rectangle || chosen.size() == lvl);
 
-    vector<vector<path_element>> paths;
+    vector<vector<vector<path_element>>> paths;
     LogN("Final (" << finalCnt << ")");
-    vector<clause_instance*> shuffledChosen(chosen);
-    Shuffle(shuffledChosen);
 
-    vector<path_element> current_path;
-    unsigned steps = 0;
-    find_path(0, shuffledChosen, current_path, paths, steps);
-    if (paths.empty() && steps >= MAX_FINAL_STEPS) {
-        find_path_sat(shuffledChosen, paths);
-    }
-    if (paths.empty())
-        return;
+    unordered_set<clause_instance*> visited;
+    unsigned minPathCnt = UINT_MAX;
+
+    for (unsigned i = 0; i < chosen.size(); i++) {
+        clause_instance* const start = chosen[i];
+        if (contains(visited, start->find_root(*this)))
+            continue;
+        paths.emplace_back();
+        visited.insert(start->find_root(*this));
+        clause_instance* current = start;
+        vector<clause_instance*> shuffledChosen;
+
+        do {
+            shuffledChosen.push_back(current);
+            current = current->next_sibling;
+        } while (current != start);
+
+        Shuffle(shuffledChosen);
+
+        vector<path_element> current_path;
+        unsigned steps = 0;
+
+        find_path(0, shuffledChosen, current_path, paths.back(), steps);
+        if (paths.back().empty() && steps >= MAX_FINAL_STEPS) {
+            find_path_sat(shuffledChosen, paths.back());
+        }
+        if (paths.back().empty())
+            return;
+        minPathCnt = min(minPathCnt, (unsigned)paths.back().size());
 #ifdef DEBUG
-    LogN("Found at least: " << paths.size());
+        LogN("Found at least: " << paths.back().size());
 #endif
-    // TODO: Do we really need all selection expressions as justifications (if we have multiple of the same kind)
+    }
+    LogN("Found " << paths.size() << " separate submatrixes");
+
+    if (paths.size() > 1) {
+        // TODO: Remove; just want to see if this occurs in practice
+        LogN("Created multiple submatrixes");
+        assert(false);
+    }
+    assert(minPathCnt > 0 && minPathCnt != UINT_MAX);
+
+    // just randomly put them together again
+    vector<vector<path_element>> combinedPaths;
+    [[unlikely]]
+    if (paths.size() != 1) {
+        combinedPaths.reserve(minPathCnt);
+        for (unsigned i = 0; i < minPathCnt; i++) {
+            combinedPaths.emplace_back();
+            for (unsigned j = 0; j < paths.size(); j++) {
+                auto randomPath = paths[j][getRandom(0, paths[j].size())];
+                for (unsigned k = 0; k < randomPath.size(); k++) {
+                    combinedPaths.back().push_back(randomPath[k]);
+                }
+            }
+        }
+    }
+    else {
+        combinedPaths = std::move(paths[0]);
+    }
+
     vector<literal> justifications;
     justifications.reserve(chosen.size());
     for (int i = 0; i < chosen.size(); i++) {
         justifications.push_back(chosen[i]->selector);
     }
 
-    for (auto& path : paths) {
+    for (auto& path : combinedPaths) {
         vector<formula> constraints;
         for (int i = 0; i < path.size(); i++) {
             for (int j = i + 1; j < path.size(); j++) {
