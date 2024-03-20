@@ -395,7 +395,7 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
                 assert(!subproblems.empty());
                 assert(!eq);
                 formula expr = term_solver.make_less_expr(subproblems, eq);
-                hard_propagate({ e }, expr);
+                hard_propagate({ /*e*/ }, expr);
                 stop_watch(var_order_time);
 #ifndef PUSH_POP
             }
@@ -469,7 +469,7 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
 
                         formula neq = diseq->GetNegConstraints(*this, info->literals[k], info->literals[l]);
                         if (!neq->is_true())
-                            hard_propagate({ e }, neq);
+                            hard_propagate({ /*e*/ }, neq);
                         delete diseq;
                     }
                 }
@@ -702,7 +702,7 @@ void matrix_propagator::final() {
                         unsigned maxId = 0;
                         auto& cachedClause = cachedClauses[i];
                         for (; maxId < cachedClause.size(); maxId++) {
-                            if (cachedClause[maxId]->value != undef)
+                            if (cachedClause[maxId]->value != sat)
                                 break;
                         }
                         if (maxId >= cachedClause.size()) {
@@ -711,7 +711,7 @@ void matrix_propagator::final() {
                         else {
                             vector<formula> cnstr = { cachedClause[maxId]->selector };
                             unification->GetPosConstraints(*this, elem.lit, cachedClause[maxId]->literals[j], cnstr);
-                            cnstr.push_back(m.mk_and(cnstr));
+                            constraints.push_back(m.mk_and(cnstr));
                         }
                     }
                 }
