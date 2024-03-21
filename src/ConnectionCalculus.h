@@ -11,7 +11,7 @@ protected:
     Abstraction(simple_adt_solver* solver) : solver(solver) {}
 
 public:
-    virtual term* apply(const vector<term*>& args) const = 0;
+    virtual const term* apply(const vector<const term*>& args) const = 0;
 };
 
 class variable_abstraction : public Abstraction {
@@ -26,7 +26,7 @@ public:
         assert(var->FuncID < 0);
     }
 
-    term* apply(const vector<term*>& args) const override;
+    const term* apply(const vector<const term*>& args) const override;
 };
 
 class term_abstraction : public Abstraction {
@@ -39,7 +39,7 @@ public:
 
     term_abstraction(simple_adt_solver* solver, int termId) : Abstraction(solver), termId(termId) {}
 
-    term* apply(const vector<term*>& args) const override;
+    const term* apply(const vector<const term*>& args) const override;
 };
 
 tri_state solve(const string& path, ProgParams& progParams, bool silent);
@@ -52,6 +52,6 @@ cnf<clause> to_cnf(z3::context& ctx, const z3::expr& input, bool polarity, z3::e
 void CollectTerm(const z3::expr& expr, unordered_set<optional<z3::func_decl>>& language,
                  std::unordered_set<unsigned>& visited);
 
-term* substitute_term(const z3::expr& expr,
+const term* substitute_term(const z3::expr& expr,
                       const unordered_map<z3::func_decl, term_abstraction>& termAbstraction,
                       const unordered_map<z3::func_decl, variable_abstraction>& varAbstraction);

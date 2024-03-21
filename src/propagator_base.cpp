@@ -106,8 +106,8 @@ subterm_hint* propagator_base::CollectConstrainUnifiable(const ground_literal& l
     unsigned arity = l1.arity();
 
     for (unsigned i = 0; i < arity; i++) {
-        term* lhs = l1.lit->arg_bases[i];
-        term* rhs = l2.arg_bases[i];
+        const term* lhs = l1.lit->arg_bases[i];
+        const term* rhs = l2.arg_bases[i];
         if (!lhs->SeemsPossiblyUnifiable(rhs, *hint)) {
             delete hint;
             return nullptr;

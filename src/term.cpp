@@ -176,7 +176,7 @@ z3::expr term_instance::to_z3(matrix_propagator& propagator, z3::context& contex
         return *e;
 
     z3::expr_vector args(context);
-    for (term* arg: t->Args) {
+    for (const term* arg: t->Args) {
         args.push_back(arg->get_instance(cpy_idx(), propagator)->to_z3(propagator, context, map, terms));
     }
     if (t->FuncID < 0)
@@ -189,15 +189,32 @@ z3::expr term_instance::to_z3(matrix_propagator& propagator, z3::context& contex
     return *e;
 }
 
+const term* term_instance::fully_expand(matrix_propagator& propagator) {
+    if (t->is_ground())
+        return this->t;
+    if (t->is_const()) {
+        assert(!t->Args.empty());
+        vector<const term*> args;
+        for (unsigned i = 0; i < t->Args.size(); i++) {
+            args.push_back(get_arg(i, propagator)->fully_expand(propagator));
+        }
+        return t->Solver.make_term(t->FuncID, std::move(args), nullptr);
+    }
+    term_instance* inst = find_root(propagator);
+    if (inst->t->is_const())
+        return inst->fully_expand(propagator);
+    return inst->t->Solver.get_unique_skolem();
+}
+
 unsigned term::solver_id() const { return Solver.id(); }
 
-term::term(int funcId, vector<term*> args, simple_adt_solver& solver, unsigned hashId, const indexed_clause* clause) :
+term::term(int funcId, vector<const term*> args, simple_adt_solver& solver, unsigned hashId, const indexed_clause* clause) :
         raw_term(funcId, std::move(args)), ast_id(hashId), origin_clause(clause), Solver(solver)
 #ifndef NDEBUG
         , name(to_string())
 #endif
         {
-    assert((clause == nullptr) == (funcId >= 0 && all_of(Args.cbegin(), Args.cend(), [](term* o) { return o->is_ground(); })));
+    assert((clause == nullptr) == (funcId >= 0 && all_of(Args.cbegin(), Args.cend(), [](const term* o) { return o->is_ground(); })));
 }
 
 term::~term() {
@@ -219,7 +236,7 @@ term_instance* term::get_instance(unsigned cpy, matrix_propagator& propagator) c
     return instances[cpy];
 }
 
-bool term::SeemsPossiblyUnifiable(term* rhs, subterm_hint& hint) {
+bool term::SeemsPossiblyUnifiable(const term* rhs, subterm_hint& hint) const {
     // TODO: Just create the equality axiom and check if it is false (cached anyway as well)
     if (FuncID < 0 || rhs->FuncID < 0) {
         hint.add(this, rhs);
@@ -252,3 +269,4 @@ string term::to_string() const {
 string term::pretty_print(unsigned cpyIdx, unordered_map<term_instance*, string>* prettyNames) const {
     return Solver.pretty_print(this, cpyIdx, prettyNames);
 }
+

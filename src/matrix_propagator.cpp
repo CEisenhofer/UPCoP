@@ -185,7 +185,7 @@ void matrix_propagator::check_proof(z3::context& ctx) {
         for (ground_literal l : c->literals) {
             z3::expr_vector args(ctx);
             z3::sort_vector argSorts(ctx);
-            for (term* t : l.lit->arg_bases) {
+            for (const term* t : l.lit->arg_bases) {
                 term_instance* inst = t->get_instance(l.copyIdx, *this);
                 terms.push_back(inst);
                 args.push_back(inst->to_z3(*this, ctx, lookup, allTerms));

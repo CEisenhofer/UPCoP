@@ -537,14 +537,14 @@ int simple_adt_solver::peek_term(const string& name, vector<unsigned> domain) {
     return id;
 }
 
-term* simple_adt_solver::make_term(int id, const vector<term*>& args, const indexed_clause* clause) {
+term* simple_adt_solver::make_term(int id, const vector<const term*>& args, const indexed_clause* clause) {
     assert(id >= 0);
     if (id >= funcNames.size())
         throw solving_exception("Term index out of bounds");
     return make_term_internal(id, args, clause);
 }
 
-term* simple_adt_solver::make_term_internal(int id, const vector<term*>& args, const indexed_clause* clause) {
+term* simple_adt_solver::make_term_internal(int id, const vector<const term*>& args, const indexed_clause* clause) {
     const RawTermWrapper key(new raw_term(id, args));
     term* t = nullptr;
     if (tryGetValue(hashCon, key, t)) {

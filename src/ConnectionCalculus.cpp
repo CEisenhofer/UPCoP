@@ -16,12 +16,12 @@
 
 #endif
 
-term* variable_abstraction::apply(const vector<term*>& args) const {
+const term* variable_abstraction::apply(const vector<const term*>& args) const {
     assert(args.empty());
     return var;
 }
 
-term* term_abstraction::apply(const vector<term*>& args) const {
+const term* term_abstraction::apply(const vector<const term*>& args) const {
     const indexed_clause* cl = nullptr;
     for (auto* arg : args) {
         assert(cl == nullptr || arg->clause() == nullptr || cl == arg->clause());
@@ -377,7 +377,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
             auto* interpretation = s.first->find_root(*propagator);
             if (interpretation != s.first)
                 cout << "Substitution: " << s.second << " -> "
-                     << interpretation->t->pretty_print(interpretation->cpy_idx(), &prettyNames) << '\n';
+                     << interpretation->fully_expand(*propagator)->pretty_print(0, &prettyNames) << '\n';
         }
 
         cout << "Found proof in " << stop_watch(overall_time) << "ms" << endl;
@@ -494,7 +494,7 @@ cnf<indexed_clause*> to_cnf(const z3::expr& input, complex_adt_solver& adtSolver
             variableAbstraction.try_emplace(arg, &solver, v);
         }
         for (const auto& lit : entry.literals) {
-            vector<term*> args;
+            vector<const term*> args;
             args.reserve(lit.arg_bases.size());
             for (const auto& arg : lit.InitExprs.value()) {
                 args.push_back(substitute_term(arg, termAbstraction, variableAbstraction));
@@ -680,10 +680,10 @@ void CollectTerm(const z3::expr& expr, unordered_set<optional<z3::func_decl>>& l
         CollectTerm(arg, language, visited);
 }
 
-term* substitute_term(const z3::expr& expr,
+const term* substitute_term(const z3::expr& expr,
                       const unordered_map<z3::func_decl, term_abstraction>& termAbstraction,
                       const unordered_map<z3::func_decl, variable_abstraction>& varAbstraction) {
-    vector<term*> args;
+    vector<const term*> args;
     args.reserve(expr.num_args());
     for (const auto& arg : expr.args())
         args.push_back(substitute_term(arg, termAbstraction, varAbstraction));

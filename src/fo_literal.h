@@ -8,12 +8,12 @@ struct fo_literal {
     string name;
     unsigned nameID;
     bool polarity;
-    vector<term*> arg_bases;
+    vector<const term*> arg_bases;
     optional<z3::expr_vector> InitExprs = nullopt;
 
     inline unsigned arity() const { return arg_bases.size(); }
 
-    fo_literal(string name, unsigned nameID, bool polarity, vector<term*> args) : name(std::move(name)), nameID(nameID), polarity(polarity), arg_bases(std::move(args)) { }
+    fo_literal(string name, unsigned nameID, bool polarity, vector<const term*> args) : name(std::move(name)), nameID(nameID), polarity(polarity), arg_bases(std::move(args)) { }
 
     fo_literal() : name("StdConstructor"), nameID(UINT32_MAX), polarity(true), arg_bases() { }
 

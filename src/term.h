@@ -13,9 +13,9 @@ struct clause_instance;
 
 struct raw_term {
     int FuncID;
-    const vector<term*> Args;
+    const vector<const term*> Args;
 
-    raw_term(int funcId, vector<term*> args) : FuncID(funcId), Args(std::move(args)) {
+    raw_term(int funcId, vector<const term*> args) : FuncID(funcId), Args(std::move(args)) {
     }
 
     bool operator==(const raw_term& other) const {
@@ -107,7 +107,7 @@ public:
         return !this->operator==(other);
     }
 
-    term(int funcId, vector<term*> args, simple_adt_solver& solver, unsigned hashId, const indexed_clause* clause);
+    term(int funcId, vector<const term*> args, simple_adt_solver& solver, unsigned hashId, const indexed_clause* clause);
 
     term(const term&) = delete;
 
@@ -117,7 +117,7 @@ public:
 
     term_instance* get_instance(unsigned cpy, matrix_propagator& propagator) const;
 
-    bool SeemsPossiblyUnifiable(term* rhs, subterm_hint& hint);
+    bool SeemsPossiblyUnifiable(const term* rhs, subterm_hint& hint) const;
 
     int compare_to(const term* other) const {
         return this == other ? 0 : (id() < other->id() ? -1 : id() > other->id() ? 1 : 0);
@@ -276,7 +276,7 @@ namespace std {
 struct term_instance {
 
     // ast
-    const term* t;
+    const term* const t;
     clause_instance* const origin;
 
     // enode
@@ -357,7 +357,13 @@ public:
         return t->to_string() + "#" + std::to_string(cpy_idx());
     }
 
+    string pretty_print(unordered_map<term_instance*, string>* prettyNames) const {
+        return t->pretty_print(cpy_idx(), prettyNames);
+    }
+
     z3::expr to_z3(matrix_propagator& propagator, z3::context& context, unordered_map<term_instance*, optional<z3::expr>>& map, vector<term_instance*>& terms);
+
+    const term* fully_expand(matrix_propagator& propagator);
 };
 
 

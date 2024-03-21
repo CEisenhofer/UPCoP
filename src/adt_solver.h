@@ -102,6 +102,8 @@ class simple_adt_solver {
     unordered_map<string, int> nameToId;
     unordered_map<RawTermWrapper, term*> hashCon;
 
+    const term* unique_skolem;
+
     unsigned markIdx = 0;
 
     void conflict(const justification& just);
@@ -110,7 +112,29 @@ class simple_adt_solver {
 
     void ensure_founded();
 
+
 public:
+
+    const term* get_unique_skolem() {
+        if (unique_skolem == nullptr) {
+            int id = 0;
+            if (!tryGetValue(nameToId, string("uSk"), id)) {
+                unique_skolem = make_var("uSk", nullptr);
+            }
+            else {
+                unsigned i = 0;
+                for (; i <= funcNames.size(); i++) {
+                    string name = string("uSk") + std::to_string(i);
+                    if (!tryGetValue(nameToId, name, id)) {
+                        unique_skolem = make_var(name, nullptr);
+                        break;
+                    }
+                }
+                assert(unique_skolem != nullptr);
+            }
+        }
+        return unique_skolem;
+    }
 
     simple_adt_solver(complex_adt_solver& complexSolver, unsigned id) : complexSolver(complexSolver), solverId(id) { }
 
@@ -167,12 +191,12 @@ public:
     int peek_term(const string& name, unsigned argCnt);
     int peek_term(const string& name, vector<unsigned> domain);
 
-    inline term* make_term(const string& name, const vector<term*>& args, const indexed_clause* clause) {
+    inline term* make_term(const string& name, const vector<const term*>& args, const indexed_clause* clause) {
         return make_term(peek_term(name, args.size()), args, clause);
     }
 
-    term* make_term(int id, const vector<term*>& args, const indexed_clause* clause);
-    term* make_term_internal(int id, const vector<term*>& args, const indexed_clause* clause);
+    term* make_term(int id, const vector<const term*>& args, const indexed_clause* clause);
+    term* make_term_internal(int id, const vector<const term*>& args, const indexed_clause* clause);
     term* make_var(const string& name, const indexed_clause* clause);
     term* make_var(int idx, const indexed_clause* clause);
 

@@ -50,13 +50,13 @@ public:
 class subterm_hint final {
 
     const bool swapped = false;
-    vector<pair<term*, term*>> equalities;
+    vector<pair<const term*, const term*>> equalities;
 
 public:
 
     subterm_hint() = default;
 
-    subterm_hint(vector<pair<term*, term*>> equalities, bool swapped) : swapped(swapped), equalities(std::move(equalities)) { }
+    subterm_hint(vector<pair<const term*, const term*>> equalities, bool swapped) : swapped(swapped), equalities(std::move(equalities)) { }
 
     void GetPosConstraints(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2, vector<formula>& constraints) const;
     formula GetNegConstraints(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2) const;
@@ -76,7 +76,7 @@ public:
         return new subterm_hint(equalities, !swapped);
     }
 
-    void add(term* t1, term* t2) {
+    void add(const term* t1, const term* t2) {
         equalities.emplace_back(t1, t2);
     }
 };
