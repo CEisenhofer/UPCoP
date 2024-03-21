@@ -355,7 +355,8 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
                     }
                     clause_instance::merge_root(r1, r2, *this);
                     for (auto* c : toEnable) {
-                        delayed_rp(c);
+                        if (!delayed_rp(c))
+                            return;
                     }
                 }
             }
@@ -435,7 +436,8 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
             chosen.pop_back();
         });
 
-        delayed_rp(info);
+        if (!delayed_rp(info))
+            return;
 
 #ifndef PUSH_POP
         if (!info->propagated) {
@@ -484,7 +486,7 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
     }
 }
 
-void matrix_propagator::delayed_rp(clause_instance* info) {
+bool matrix_propagator::delayed_rp(clause_instance* info) {
     /*if (chosen[0]->find_root(*this) != info->find_root(*this))
         // The current clause is not connected to a relevant clause
         return;*/
@@ -495,7 +497,7 @@ void matrix_propagator::delayed_rp(clause_instance* info) {
             assert(eq.just.litJust.size() == 1 && eq.just.eqJust.empty());
             LogN("Delayed: " << eq.to_string() << " := 1");
             if (!term_solver.asserted_eq(eq.just.litJust[0], eq.LHS, eq.RHS, true))
-                return;
+                return false;
         }
         catch (...) {
             cout << "Crashed unify" << endl;
@@ -507,7 +509,7 @@ void matrix_propagator::delayed_rp(clause_instance* info) {
             assert(eq.just.litJust.size() == 1 && eq.just.eqJust.empty());
             LogN("Delayed: " << eq.to_string() << " := 0");
             if (!term_solver.asserted_eq(eq.just.litJust[0], eq.LHS, eq.RHS, false))
-                return;
+                return false;
         }
         catch (...) {
             cout << "Crashed unify" << endl;
@@ -520,7 +522,7 @@ void matrix_propagator::delayed_rp(clause_instance* info) {
             literal lit = term_solver.make_less_atom(less.LHS, less.RHS);
 
             if (!term_solver.asserted_less(lit, less.LHS, less.RHS))
-                return;
+                return false;
         }
         catch (...) {
             cout << "Crashed unify" << endl;

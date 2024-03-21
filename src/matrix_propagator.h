@@ -156,7 +156,7 @@ public:
 
     void fixed(literal e, bool value) override;
 
-    void delayed_rp(clause_instance* info);
+    bool delayed_rp(clause_instance* info);
 
     bool propagate_rules(literal e, clause_instance* info) {
         start_watch(connect_time);
