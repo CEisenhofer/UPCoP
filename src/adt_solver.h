@@ -119,14 +119,14 @@ public:
         if (unique_skolem == nullptr) {
             int id = 0;
             if (!tryGetValue(nameToId, string("uSk"), id)) {
-                unique_skolem = make_var("uSk", nullptr);
+                unique_skolem = make_term("uSk", {}, nullptr);
             }
             else {
                 unsigned i = 0;
                 for (; i <= funcNames.size(); i++) {
                     string name = string("uSk") + std::to_string(i);
                     if (!tryGetValue(nameToId, name, id)) {
-                        unique_skolem = make_var(name, nullptr);
+                        unique_skolem = make_term(name, {}, nullptr);
                         break;
                     }
                 }
