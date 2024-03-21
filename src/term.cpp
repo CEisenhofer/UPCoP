@@ -5,7 +5,7 @@
 size_t hash<raw_term>::operator()(const raw_term& x) const {
     static const hash<term> hash;
     size_t ret = x.FuncID;
-    for (auto* arg: x.Args)
+    for (const auto* arg: x.Args)
         ret = 31 * ret + hash(*arg);
     return ret;
 }

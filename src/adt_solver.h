@@ -102,7 +102,7 @@ class simple_adt_solver {
     unordered_map<string, int> nameToId;
     unordered_map<RawTermWrapper, term*> hashCon;
 
-    const term* unique_skolem;
+    const term* unique_skolem = nullptr;
 
     unsigned markIdx = 0;
 
