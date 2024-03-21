@@ -1,14 +1,6 @@
 #pragma once
 #include "propagator_base.h"
 
-struct path_element {
-    const indexed_clause& clause;
-    int cpy;
-    const ground_literal lit;
-
-    path_element(const indexed_clause& clause, int cpy, const ground_literal& lit) : clause(clause), cpy(cpy), lit(lit) {}
-};
-
 struct clause_instance {
     const indexed_clause* clause;
     const unsigned copyIdx;
@@ -60,9 +52,7 @@ struct clause_instance {
     static void merge_root(clause_instance* b, clause_instance* newRoot, propagator_base& propagator) {
         assert(b->is_root());
         assert(newRoot->is_root());
-
-        if (b == newRoot)
-            return;
+        assert(b != newRoot);
 
         auto* p = newRoot->prev_sibling;
         auto* n = b->next_sibling;
@@ -86,6 +76,14 @@ struct clause_instance {
     }
 
     string to_string() const { return std::to_string(copyIdx + 1) + ". copy of clause #" + std::to_string(clause->Index); }
+};
+
+struct path_element {
+    const clause_instance& clause;
+    int cpy;
+    const ground_literal lit;
+
+    path_element(const clause_instance& clause, int cpy, const ground_literal& lit) : clause(clause), cpy(cpy), lit(lit) {}
 };
 
 class matrix_propagator : public propagator_base {
@@ -158,6 +156,8 @@ public:
 
     void fixed(literal e, bool value) override;
 
+    void delayed_rp(clause_instance* info);
+
     bool propagate_rules(literal e, clause_instance* info) {
         start_watch(connect_time);
         for (const auto& lit : info->literals) {
@@ -222,6 +222,7 @@ public:
                 }
             }
         }
+        std::flush(std::cout);
     }
 
 };

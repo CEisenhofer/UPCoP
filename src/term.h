@@ -357,7 +357,7 @@ public:
         return t->to_string() + "#" + std::to_string(cpy_idx());
     }
 
-    z3::expr to_z3(matrix_propagator& propagator, z3::context& context, unordered_map<term_instance*, optional<z3::expr>>& map);
+    z3::expr to_z3(matrix_propagator& propagator, z3::context& context, unordered_map<term_instance*, optional<z3::expr>>& map, vector<term_instance*>& terms);
 };
 
 

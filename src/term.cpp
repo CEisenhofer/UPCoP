@@ -170,19 +170,22 @@ term_instance* term_instance::find_root(propagator_base& propagator) {
     return current;
 }
 
-z3::expr term_instance::to_z3(matrix_propagator& propagator, z3::context& context, unordered_map<term_instance*, optional<z3::expr>>& map) {
+z3::expr term_instance::to_z3(matrix_propagator& propagator, z3::context& context, unordered_map<term_instance*, optional<z3::expr>>& map, vector<term_instance*>& terms) {
     optional<z3::expr> e;
     if (tryGetValue(map, this, e))
         return *e;
+
     z3::expr_vector args(context);
     for (term* arg: t->Args) {
-        args.push_back(arg->get_instance(cpy_idx(), propagator)->to_z3(propagator, context, map));
+        args.push_back(arg->get_instance(cpy_idx(), propagator)->to_z3(propagator, context, map, terms));
     }
     if (t->FuncID < 0)
         e = FreshConstant(context, "var", t->Solver.get_z3_sort());
     else
         e = t->Solver.get_z3_sort().constructors()[t->FuncID](args);
     map.insert(make_pair(this, e));
+    terms.push_back(this);
+    assert(map.size() == terms.size());
     return *e;
 }
 

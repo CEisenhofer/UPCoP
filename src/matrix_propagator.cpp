@@ -174,6 +174,7 @@ void matrix_propagator::check_proof(z3::context& ctx) {
     z3::solver z3Solver(ctx);
 
     unordered_map<term_instance*, optional<z3::expr>> lookup;
+    vector<term_instance*> allTerms;
     z3::expr_vector clauses(ctx);
 
     for (clause_instance* c : chosen) {
@@ -187,7 +188,7 @@ void matrix_propagator::check_proof(z3::context& ctx) {
             for (term* t : l.lit->arg_bases) {
                 term_instance* inst = t->get_instance(l.copyIdx, *this);
                 terms.push_back(inst);
-                args.push_back(inst->to_z3(*this, ctx, lookup));
+                args.push_back(inst->to_z3(*this, ctx, lookup, allTerms));
                 argSorts.push_back(inst->t->Solver.get_z3_sort());
             }
             z3::expr e = ctx.function(l.lit->name.c_str(), argSorts, ctx.bool_sort())(args);
@@ -199,10 +200,11 @@ void matrix_propagator::check_proof(z3::context& ctx) {
         clauses.push_back(mk_or(literal));
     }
 
-    for (auto& pair : lookup) {
-        if (pair.first->is_root() || !(pair.first->t->is_var()))
+    for (unsigned i = 0; i < allTerms.size(); i++) {
+        auto& pair = allTerms[i];
+        if (pair->is_root() || !(pair->t->is_var()))
             continue;
-        z3Solver.add(*(pair.second) == pair.first->find_root(*this)->to_z3(*this, ctx, lookup));
+        z3Solver.add(pair->to_z3(*this, ctx, lookup, allTerms) == pair->find_root(*this)->to_z3(*this, ctx, lookup, allTerms));
     }
 
 
@@ -330,10 +332,35 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
             for (const auto& [just, c1, c2] : e->connections) {
                 bool val = false;
                 if (get_value(just, val) && val) {
-                    clause_instance::merge_root(c1->find_root(*this), c2->find_root(*this), *this);
+                    auto* r1 = c1->find_root(*this);
+                    auto* r2 = c2->find_root(*this);
+                    auto* start = chosen[0]->find_root(*this);
+
+                    if (r1 == r2)
+                        continue;
+                    vector<clause_instance*> toEnable;
+                    if (r1 == start) {
+                        auto* current = r2;
+                        do {
+                            toEnable.push_back(current);
+                            current = current->next_sibling;
+                        } while (current != r2);
+                    }
+                    else if (r2 == start) {
+                        auto* current = r1;
+                        do {
+                            toEnable.push_back(current);
+                            current = current->next_sibling;
+                        } while (current != r1);
+                    }
+                    clause_instance::merge_root(r1, r2, *this);
+                    for (auto* c : toEnable) {
+                        delayed_rp(c);
+                    }
                 }
             }
         }
+
 
         if (!interpreted[abs(e->get_lit()) - 1])
             return;
@@ -409,44 +436,7 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
             chosen.pop_back();
         });
 
-        // "Relevance propagation" of delayed equalities
-        for (const auto& eq : info->delayedRelevantTrue) {
-            try {
-                assert(eq.just.litJust.size() == 1 && eq.just.eqJust.empty());
-                LogN("Delayed: " << eq.to_string() << " := 1");
-                if (!term_solver.asserted_eq(eq.just.litJust[0], eq.LHS, eq.RHS, true))
-                    return;
-            }
-            catch (...) {
-                cout << "Crashed unify" << endl;
-                exit(132);
-            }
-        }
-        for (const auto& eq : info->delayedRelevantFalse) {
-            try {
-                assert(eq.just.litJust.size() == 1 && eq.just.eqJust.empty());
-                LogN("Delayed: " << eq.to_string() << " := 0");
-                if (!term_solver.asserted_eq(eq.just.litJust[0], eq.LHS, eq.RHS, false))
-                    return;
-            }
-            catch (...) {
-                cout << "Crashed unify" << endl;
-                exit(132);
-            }
-        }
-        for (const auto& less : info->delayedRelevantLess) {
-            try {
-                LogN("Delayed: " << less.to_string());
-                literal lit = term_solver.make_less_atom(less.LHS, less.RHS);
-
-                if (!term_solver.asserted_less(lit, less.LHS, less.RHS))
-                    return;
-            }
-            catch (...) {
-                cout << "Crashed unify" << endl;
-                exit(132);
-            }
-        }
+        delayed_rp(info);
 
 #ifndef PUSH_POP
         if (!info->propagated) {
@@ -489,6 +479,51 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
         cout << "Crashed" << endl;
         __builtin_trap();
         exit(131);
+    }
+}
+
+void matrix_propagator::delayed_rp(clause_instance* info) {
+    /*if (chosen[0]->find_root(*this) != info->find_root(*this))
+        // The current clause is not connected to a relevant clause
+        return;*/
+
+    // "Relevance propagation" of delayed equalities
+    for (const auto& eq : info->delayedRelevantTrue) {
+        try {
+            assert(eq.just.litJust.size() == 1 && eq.just.eqJust.empty());
+            LogN("Delayed: " << eq.to_string() << " := 1");
+            if (!term_solver.asserted_eq(eq.just.litJust[0], eq.LHS, eq.RHS, true))
+                return;
+        }
+        catch (...) {
+            cout << "Crashed unify" << endl;
+            exit(132);
+        }
+    }
+    for (const auto& eq : info->delayedRelevantFalse) {
+        try {
+            assert(eq.just.litJust.size() == 1 && eq.just.eqJust.empty());
+            LogN("Delayed: " << eq.to_string() << " := 0");
+            if (!term_solver.asserted_eq(eq.just.litJust[0], eq.LHS, eq.RHS, false))
+                return;
+        }
+        catch (...) {
+            cout << "Crashed unify" << endl;
+            exit(132);
+        }
+    }
+    for (const auto& less : info->delayedRelevantLess) {
+        try {
+            LogN("Delayed: " << less.to_string());
+            literal lit = term_solver.make_less_atom(less.LHS, less.RHS);
+
+            if (!term_solver.asserted_less(lit, less.LHS, less.RHS))
+                return;
+        }
+        catch (...) {
+            cout << "Crashed unify" << endl;
+            exit(132);
+        }
     }
 }
 
@@ -600,7 +635,7 @@ void matrix_propagator::final() {
     }
     assert(progParams.Mode != Rectangle || chosen.size() == lvl);
 
-    vector<vector<vector<path_element>>> paths;
+    vector<vector<vector<path_element>>> submatrix_paths;
     LogN("Final (" << finalCnt << ")");
 
     unordered_set<clause_instance*> visited;
@@ -610,7 +645,7 @@ void matrix_propagator::final() {
         clause_instance* const start = chosen[i];
         if (contains(visited, start->find_root(*this)))
             continue;
-        paths.emplace_back();
+        submatrix_paths.emplace_back();
         visited.insert(start->find_root(*this));
         clause_instance* current = start;
         vector<clause_instance*> shuffledChosen;
@@ -625,103 +660,111 @@ void matrix_propagator::final() {
         vector<path_element> current_path;
         unsigned steps = 0;
 
-        find_path(0, shuffledChosen, current_path, paths.back(), steps);
-        if (paths.back().empty() && steps >= MAX_FINAL_STEPS) {
-            find_path_sat(shuffledChosen, paths.back());
+        find_path(0, shuffledChosen, current_path, submatrix_paths.back(), steps);
+        if (submatrix_paths.back().empty() && steps >= MAX_FINAL_STEPS) {
+            find_path_sat(shuffledChosen, submatrix_paths.back());
         }
-        if (paths.back().empty())
+        if (submatrix_paths.back().empty())
             return;
-        minPathCnt = min(minPathCnt, (unsigned)paths.back().size());
+        minPathCnt = min(minPathCnt, (unsigned)submatrix_paths.back().size());
 #ifdef DEBUG
-        LogN("Found at least: " << paths.back().size());
+        LogN("Found at least: " << submatrix_paths.back().size());
 #endif
     }
-    LogN("Found " << paths.size() << " separate submatrixes");
+    LogN("Found " << submatrix_paths.size() << " separate submatrixes");
 
-    if (paths.size() > 1) {
+    if (submatrix_paths.size() > 1) {
         // TODO: Remove; just want to see if this occurs in practice
         LogN("Created multiple submatrixes");
-        assert(false);
     }
     assert(minPathCnt > 0 && minPathCnt != UINT_MAX);
 
     // just randomly put them together again
     vector<vector<path_element>> combinedPaths;
     [[unlikely]]
-    if (paths.size() != 1) {
+    if (submatrix_paths.size() != 1 && progParams.Mode == Rectangle) {
         combinedPaths.reserve(minPathCnt);
         for (unsigned i = 0; i < minPathCnt; i++) {
             combinedPaths.emplace_back();
-            for (unsigned j = 0; j < paths.size(); j++) {
-                auto randomPath = paths[j][getRandom(0, paths[j].size())];
+            for (unsigned j = 0; j < submatrix_paths.size(); j++) {
+                auto randomPath = submatrix_paths[j][getRandom(0, submatrix_paths[j].size())];
                 for (unsigned k = 0; k < randomPath.size(); k++) {
                     combinedPaths.back().push_back(randomPath[k]);
                 }
             }
         }
-    }
-    else {
-        combinedPaths = std::move(paths[0]);
-    }
-
-    vector<literal> justifications;
-    justifications.reserve(chosen.size());
-    for (int i = 0; i < chosen.size(); i++) {
-        justifications.push_back(chosen[i]->selector);
+        submatrix_paths.resize(0);
+        submatrix_paths.push_back(std::move(combinedPaths));
     }
 
-    for (auto& path : combinedPaths) {
-        vector<formula> constraints;
-        for (int i = 0; i < path.size(); i++) {
-            for (int j = i + 1; j < path.size(); j++) {
-                assert(!are_connected(path[i].lit, path[j].lit));
-                vector<formula> unificationConstraint;
-                const auto* unification = unificationHints.get(path[i].lit.lit->Index, path[j].lit.lit->Index);
-                assert(unification != nullptr);
-                if (!large_array::is_invalid(unification) && path[i].lit.lit->polarity != path[j].lit.lit->polarity) {
-                    unification->GetPosConstraints(*this, path[i].lit, path[j].lit, unificationConstraint);
-                    if (!unificationConstraint.empty())
-                        constraints.push_back(m.mk_and(unificationConstraint));
-                }
-            }
+    for (const auto& paths : submatrix_paths) {
+        vector<literal> justifications;
+        justifications.reserve(paths.size());
+        for (int i = 0; i < paths[0].size(); i++) {
+            justifications.push_back(paths[0][i].clause.selector);
         }
 
-        if (progParams.Mode == Core) {
-            for (auto elem : path) {
-                for (unsigned i = 0; i < matrix.size(); i++) {
-                    indexed_clause* cl = matrix[i];
-                    unsigned literalCnt = cl->literals.size();
-                    for (int j = 0; j < literalCnt; j++) {
+        for (const auto& path : paths) {
+            vector<formula> constraints;
+            for (int i = 0; i < path.size(); i++) {
+                for (int j = i + 1; j < path.size(); j++) {
+                    assert(!are_connected(path[i].lit, path[j].lit));
+                    vector<formula> unificationConstraint;
+                    const auto* unification = unificationHints.get(path[i].lit.lit->Index, path[j].lit.lit->Index);
+                    assert(unification != nullptr);
+                    if (!large_array::is_invalid(unification) && path[i].lit.lit->polarity != path[j].lit.lit->polarity) {
+                        unification->GetPosConstraints(*this, path[i].lit, path[j].lit, unificationConstraint);
+                        if (!unificationConstraint.empty())
+                            constraints.push_back(m.mk_and(unificationConstraint));
+                    }
+                }
+            }
 
-                        const subterm_hint* unification = cache_unification(elem.lit, *(cl->literals[j]));
+            if (progParams.Mode == Core) {
+                for (auto elem : path) {
+                    for (unsigned i = 0; i < matrix.size(); i++) {
+                        indexed_clause* cl = matrix[i];
+                        unsigned literalCnt = cl->literals.size();
+                        for (int j = 0; j < literalCnt; j++) {
 
-                        if (large_array::is_invalid(unification) ||
-                            elem.lit.lit->polarity == cl->literals[j]->polarity)
-                            continue;
+                            const subterm_hint* unification = cache_unification(elem.lit, *(cl->literals[j]));
 
-                        unsigned maxId = 0;
-                        auto& cachedClause = cachedClauses[i];
-                        for (; maxId < cachedClause.size(); maxId++) {
-                            if (cachedClause[maxId]->value != sat)
-                                break;
-                        }
-                        if (maxId >= cachedClause.size()) {
-                            constraints.push_back(m.mk_not(clauseLimitListExpr[i]));
-                        }
-                        else {
-                            vector<formula> cnstr = { cachedClause[maxId]->selector };
-                            unification->GetPosConstraints(*this, elem.lit, cachedClause[maxId]->literals[j], cnstr);
-                            constraints.push_back(m.mk_and(cnstr));
+                            if (large_array::is_invalid(unification) ||
+                                elem.lit.lit->polarity == cl->literals[j]->polarity)
+                                continue;
+
+                            unsigned maxId = 0;
+                            auto& cachedClause = cachedClauses[i];
+                            for (; maxId < cachedClause.size(); maxId++) {
+                                if (submatrix_paths.size() == 1) {
+                                    if (cachedClause[maxId]->value != sat)
+                                        break;
+                                }
+                                else {
+                                    // TODO: Do something smarter here to detect what is the smallest index that does not belong to the submatrix
+                                    clause_instance* current = cachedClause[maxId];
+                                    if (all_of(path.begin(), path.end(), [current](const path_element& e) { return &e.clause != current; }))
+                                        break;
+                                }
+                            }
+                            if (maxId >= cachedClause.size()) {
+                                constraints.push_back(m.mk_not(clauseLimitListExpr[i]));
+                            }
+                            else {
+                                vector<formula> cnstr = { cachedClause[maxId]->selector };
+                                unification->GetPosConstraints(*this, elem.lit, cachedClause[maxId]->literals[j], cnstr);
+                                constraints.push_back(m.mk_and(cnstr));
+                            }
                         }
                     }
                 }
             }
+            if (constraints.empty()) {
+                propagate_conflict(justifications);
+                return;
+            }
+            hard_propagate(justifications, m.mk_or(constraints));
         }
-        if (constraints.empty()) {
-            propagate_conflict(justifications);
-            return;
-        }
-        hard_propagate(justifications, m.mk_or(constraints));
     }
 }
 
@@ -762,7 +805,7 @@ void matrix_propagator::find_path(int clauseIdx, const vector<clause_instance*>&
         if (failed)
             continue;
 
-        path.emplace_back(*info->clause, info->copyIdx, l1);
+        path.emplace_back(*info, info->copyIdx, l1);
         steps++;
         find_path(clauseIdx + 1, clauses, path, foundPaths, steps);
         if (foundPaths.size() >= MAX_FINAL_PATHS)
@@ -810,7 +853,7 @@ void matrix_propagator::find_path_sat(const vector<clause_instance*>& clauses, v
             for (; j < clauses[i]->literals.size(); j++) {
                 int val = subsolver.val(abs(sat_clauses[i][j]));
                 if (val == sat_clauses[i][j]) {
-                    foundPaths.back().emplace_back(*clauses[i]->clause, clauses[i]->copyIdx, clauses[i]->literals[j]);
+                    foundPaths.back().emplace_back(*clauses[i], clauses[i]->copyIdx, clauses[i]->literals[j]);
                     newClause.push_back(-sat_clauses[i][j]);
                     break;
                 }
