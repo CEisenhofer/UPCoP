@@ -417,6 +417,9 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
                 }
                 bool eq = false;
                 std::vector<less_than> subproblems;
+                term_solver.preprocess_less(std::move(stack), subproblems, eq);
+                assert(res);
+                assert(!subproblems.empty());
                 formula expr = term_solver.make_less_expr(subproblems, eq);
                 hard_propagate({ e }, expr); // don't remove justification
                 stop_watch(var_order_time);
