@@ -529,6 +529,7 @@ bool matrix_propagator::delayed_rp(clause_instance* info) {
             exit(132);
         }
     }
+    return true;
 }
 
 formula_term* matrix_propagator::connect_literal(literal just, clause_instance* info, const ground_literal& lit) {
