@@ -201,7 +201,7 @@ void matrix_propagator::check_proof(z3::context& ctx) {
     }
 
     for (unsigned i = 0; i < allTerms.size(); i++) {
-        auto& pair = allTerms[i];
+        term_instance* pair = allTerms[i];
         if (pair->is_root() || !(pair->t->is_var()))
             continue;
         z3Solver.add(pair->to_z3(*this, ctx, lookup, allTerms) == pair->find_root(*this)->to_z3(*this, ctx, lookup, allTerms));
