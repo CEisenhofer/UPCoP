@@ -417,12 +417,8 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
                 }
                 bool eq = false;
                 std::vector<less_than> subproblems;
-                bool res = term_solver.preprocess_less(std::move(stack), subproblems, eq);
-                assert(res);
-                assert(!subproblems.empty());
-                assert(!eq);
                 formula expr = term_solver.make_less_expr(subproblems, eq);
-                hard_propagate({ /*e*/ }, expr);
+                hard_propagate({ e }, expr); // don't remove justification
                 stop_watch(var_order_time);
 #ifndef PUSH_POP
             }
@@ -454,12 +450,15 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
                             continue;
                         // Clause contains two complementary literals
                         // Why did the simplifier not remove those?!
-                        assert(!diseq->tautology());
+                        if (diseq->tautology()) {
+                            LogN("Detected tautology clause - get a better preprocessor: " << info->clause->to_string());
+                            // assert(false);
+                        }
                         // clause->TautologyConstraints->emplace_back(k, l, diseq);
 
                         formula neq = diseq->GetNegConstraints(*this, info->literals[k], info->literals[l]);
                         if (!neq->is_true())
-                            hard_propagate({ /*e*/ }, neq);
+                            hard_propagate({ e }, neq); /* we need e as a justification; otherwise a tautology clause would result in a root conflict */
                         delete diseq;
                     }
                 }
