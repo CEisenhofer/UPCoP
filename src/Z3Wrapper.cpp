@@ -52,7 +52,7 @@ void z3_propagator::propagate_conflict(const std::vector<literal>& just) {
     // assert(just.size() > 1); // No general problem with that, but this looks suspicious...
     base->set_conflict();
 #ifndef NDEBUG
-    Log("conflict (hard) [" << incCnt++ << "]: ");
+    Log("conflict [" << incCnt++ << "]: ");
     output_literals(just);
     LogN("");
 #endif
@@ -60,8 +60,9 @@ void z3_propagator::propagate_conflict(const std::vector<literal>& just) {
     z3::expr_vector aux(*ctx);
     aux.resize(just.size());
     for (unsigned i = 0; i < just.size(); i++) {
-        z3::expr e = just[i]->get_z3(*this);
+        z3::expr e = get_expr(abs(just[i]->get_lit()));
         aux.set(i, e);
+        LogN(e.to_string());
     }
 
     conflict(aux);
@@ -77,7 +78,7 @@ bool z3_propagator::propagate(const std::vector<literal>& just, literal prop) {
         return false;
     }
 #ifndef NDEBUG
-    Log("Propagating (hard) [" << incCnt++ << "]: ");
+    Log("Propagating [" << incCnt++ << "]: ");
     output_literals(just);
     Log(" => ");
     LogN(prop->to_string());
@@ -86,7 +87,7 @@ bool z3_propagator::propagate(const std::vector<literal>& just, literal prop) {
     z3::expr_vector aux(*ctx);
     aux.resize(just.size());
     for (unsigned i = 0; i < just.size(); i++) {
-        z3::expr e = just[i]->get_z3(*this);
+        z3::expr e = get_expr(abs(just[i]->get_lit()));
         aux.set(i, e);
     }
     z3::user_propagator_base::propagate(aux, prop->get_z3(*this));

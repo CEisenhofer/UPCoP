@@ -71,7 +71,7 @@ public:
     ~z3_propagator() override;
 
     bool get_value(literal v, bool& value) const {
-        tri_state val = interpretation[(v->get_lit()) - 1];
+        tri_state val = interpretation[abs(v->get_lit()) - 1];
         if (val == undef)
             return false;
         value = val == sat;
