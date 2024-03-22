@@ -7,7 +7,7 @@ static void CrashParams(const std::string& error) {
     if (!error.empty())
         std::cout << "Error: " << error << '\n';
     std::cout
-            << "Usage: ConnectionCalculus [-d initial_depth] [-dm max_depth] [-t timeout : ms] [-m [core|rect] [--input_syntax [tptp|smtlib]] [--no-preprocess] [--preprocess] [--conj] [-c [auto|keep|pos|neg|min]] [--split] [--check] path-to-smt2"
+            << "Usage: ConnectionCalculus [-d initial_depth] [-dm max_depth] [-t timeout : ms] [-m [core|rect] [--input_syntax [tptp|smtlib]] [--no-preprocess] [--preprocess] [--conj] [-c [auto|keep|pos|neg|min]] [--split] [--sat] [--smt] [--check] path-to-smt2"
             << std::endl;
     exit(-1);
 }
@@ -24,9 +24,9 @@ void parse_params(int argc, char* argv[], ProgParams& progParams) {
         if (c == "-t" || current == "--timeout") {
             if (i + 1 >= argc)
                 CrashParams("Missing argument for " + c);
-            if (!to_int(argv[i + 1], progParams.Timeout))
+            if (!to_int(argv[i + 1], progParams.timeout))
                 CrashParams("No number: " + std::string(argv[i + 1]));
-            if (progParams.Timeout < 0)
+            if (progParams.timeout < 0)
                 CrashParams("Negative timeout");
             i += 2;
             continue;
@@ -34,20 +34,20 @@ void parse_params(int argc, char* argv[], ProgParams& progParams) {
         if (c == "-d" || current == "--depth") {
             if (i + 1 >= argc)
                 CrashParams("Missing argument for " + c);
-            if (!to_uint(argv[i + 1], progParams.Depth))
+            if (!to_uint(argv[i + 1], progParams.depth))
                 CrashParams("No number: " + std::string(argv[i + 1]));
-            if (progParams.Depth == 0)
-                progParams.Depth = 1;
+            if (progParams.depth == 0)
+                progParams.depth = 1;
             i += 2;
             continue;
         }
         if (c == "-dm" || current == "--lim" || current == "--limit") {
             if (i + 1 >= argc)
                 CrashParams("Missing argument for " + c);
-            if (!to_uint(argv[i + 1], progParams.MaxDepth))
+            if (!to_uint(argv[i + 1], progParams.maxDepth))
                 CrashParams("No number: " + std::string(argv[i + 1]));
-            if (progParams.MaxDepth == 0)
-                progParams.MaxDepth = UINT_MAX;
+            if (progParams.maxDepth == 0)
+                progParams.maxDepth = UINT_MAX;
             i += 2;
             continue;
         }
@@ -56,9 +56,9 @@ void parse_params(int argc, char* argv[], ProgParams& progParams) {
                 CrashParams("Missing argument for " + c);
             std::string next = to_lower(argv[i + 1]);
             if (next == "tptp")
-                progParams.Format = TPTP;
+                progParams.format = TPTP;
             else if (next == "smtlib" || next == "smtlib2")
-                progParams.Format = SMTLIB;
+                progParams.format = SMTLIB;
             else
                 CrashParams("Unknown input syntax: " + std::string(argv[i + 1]));
             i += 2;
@@ -70,9 +70,9 @@ void parse_params(int argc, char* argv[], ProgParams& progParams) {
                 CrashParams("Missing argument for " + c);
             std::string next = to_lower(argv[i + 1]);
             if (next == "rect")
-                progParams.Mode = Rectangle;
+                progParams.mode = Rectangle;
             else if (next == "core")
-                progParams.Mode = Core;
+                progParams.mode = Core;
             else
                 CrashParams("Unknown mode: " + std::string(argv[i + 1]));
             i += 2;
@@ -80,29 +80,39 @@ void parse_params(int argc, char* argv[], ProgParams& progParams) {
         }
 
         if (current == "--split") {
-            progParams.SATSplit = true;
+            progParams.satSplit = true;
             i++;
             continue;
         }
         if (current == "--check") {
-            progParams.CheckProof = true;
+            progParams.checkProof = true;
+            i++;
+            continue;
+        }
+        if (current == "--sat") {
+            progParams.smt = false;
+            i++;
+            continue;
+        }
+        if (current == "--smt") {
+            progParams.smt = true;
             i++;
             continue;
         }
         if (current == "--no-preprocess") {
-            progParams.Preprocess = false;
-            progParams.Format = SMTLIB;
+            progParams.preprocess = false;
+            progParams.format = SMTLIB;
             i++;
             continue;
         }
         if (current == "--preprocess") {
-            progParams.Preprocess = true;
+            progParams.preprocess = true;
             i++;
             continue;
         }
 
         if (current == "--conj") {
-            progParams.Conjectures = Keep;
+            progParams.conjectures = Keep;
             i++;
             continue;
         }
@@ -111,15 +121,15 @@ void parse_params(int argc, char* argv[], ProgParams& progParams) {
                 CrashParams("Missing argument for " + c);
             std::string next = to_lower(argv[i + 1]);
             if (next == "auto")
-                progParams.Conjectures = Auto;
+                progParams.conjectures = Auto;
             else if (next == "keep")
-                progParams.Conjectures = Keep;
+                progParams.conjectures = Keep;
             else if (next == "pos")
-                progParams.Conjectures = Pos;
+                progParams.conjectures = Pos;
             else if (next == "neg")
-                progParams.Conjectures = Neg;
+                progParams.conjectures = Neg;
             else if (next == "min")
-                progParams.Conjectures = Min;
+                progParams.conjectures = Min;
             else
                 CrashParams("Unknown conjecture mode: " + std::string(argv[i + 1]));
             i += 2;
@@ -128,12 +138,12 @@ void parse_params(int argc, char* argv[], ProgParams& progParams) {
         CrashParams("Unknown argument: " + c);
     }
 
-    if (progParams.MaxDepth < progParams.Depth)
+    if (progParams.maxDepth < progParams.depth)
         CrashParams("Maximum depth has to be at least as high as the starting depth");
-    if (!progParams.Preprocess && progParams.Format == TPTP)
+    if (!progParams.preprocess && progParams.format == TPTP)
         CrashParams("TPTP input is only supported with preprocessing");
     if (argc < 2 || !std::filesystem::exists(argv[argc - 1]))
         CrashParams("File " + std::string(argv[argc - 1]) + " does not exist");
-    if (progParams.Depth > 1)
+    if (progParams.depth > 1)
         std::cout << "Warning: Did not start with level 1. Run might be incomplete (unlikely but possible)" << std::endl;
 }

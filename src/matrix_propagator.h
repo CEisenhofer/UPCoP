@@ -112,16 +112,16 @@ public:
     ~matrix_propagator() override;
 
     bool next_level() {
-        progParams.Depth = lvl + 1;
+        progParams.depth = lvl + 1;
 
-        if (progParams.Mode == Core)
+        if (progParams.mode == Core)
             return next_level_core();
 
-        assert(progParams.Mode == Rectangle);
+        assert(progParams.mode == Rectangle);
         for (unsigned i = 0; i < matrix.size(); i++) {
             if (matrix[i]->Ground && progParams.multiplicity[i] > 0)
                 continue;
-            progParams.multiplicity[i] = progParams.Depth;
+            progParams.multiplicity[i] = progParams.depth;
         }
         return false;
     }
@@ -154,7 +154,7 @@ public:
 
     void pb_clause_limit();
 
-    void fixed(literal e, bool value) override;
+    void fixed(literal e, bool value);
 
     bool delayed_rp(clause_instance* info);
 
@@ -173,8 +173,6 @@ public:
     formula connect_literal(literal just, clause_instance* info, const ground_literal& lit);
 
     void final() override;
-
-    literal decide() override;
 
     void find_path(int clauseIdx, const vector<clause_instance*>& clauses, vector<path_element>& path, vector<vector<path_element>>& foundPaths, unsigned& steps);
 

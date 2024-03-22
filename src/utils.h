@@ -12,12 +12,28 @@
 #define DEBUG
 #endif
 
+#ifndef NDEBUG
+#ifndef NOLOG
+#include <iostream>
+#define Log(s) do { std::cout << s; } while (false)
+#define LogN(s) Log(s << std::endl)
+#else
+#define Log(s) do { } while (false)
+#define LogN(s) Log(s)
+#endif
+#else
+#define Log(s) do { } while (false)
+#define LogN(s) Log(s)
+#endif
+
 #ifdef NDEBUG
 // #undef assert
 // #define assert(X) do { if (!(X)) __builtin_unreachable(); } while(false)
 #endif
 
 using namespace std;
+
+typedef std::function<void()> action;
 
 enum tri_state : unsigned char {
     undef = 0,

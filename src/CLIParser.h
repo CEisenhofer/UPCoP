@@ -23,16 +23,16 @@ enum ConjStrategy : unsigned char {
 };
 
 struct ProgParams {
-    int Timeout = 0;
-    IncStrategy Mode = Rectangle;
-    unsigned Depth = 1;
-    unsigned MaxDepth = UINT_MAX;
-    bool ExternalIteration = true;
-    bool Preprocess = true;
-    bool CheckProof = false;
-    ConjStrategy Conjectures = Keep;
-    bool SATSplit = false;
-    InputFormat Format = TPTP;
+    int timeout = 0;
+    IncStrategy mode = Rectangle;
+    unsigned depth = 1;
+    unsigned maxDepth = UINT_MAX;
+    bool preprocess = true;
+    bool checkProof = false;
+    bool smt = false;
+    ConjStrategy conjectures = Keep;
+    bool satSplit = false;
+    InputFormat format = TPTP;
 
     std::vector<unsigned> multiplicity;
     std::vector<unsigned> priority;

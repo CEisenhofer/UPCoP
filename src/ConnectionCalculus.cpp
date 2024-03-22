@@ -134,18 +134,18 @@ static void deleteCNF(cnf<indexed_clause*>& root) {
 }
 
 void prep_rect(cnf<indexed_clause*>& matrix, ProgParams& progParams) {
-    assert(progParams.Mode == Rectangle);
+    assert(progParams.mode == Rectangle);
     for (int i = 0; i < matrix.size(); i++) {
         if (matrix[i]->Ground) {
             progParams.multiplicity.push_back(1);
             continue;
         }
-        progParams.multiplicity.push_back(progParams.Depth);
+        progParams.multiplicity.push_back(progParams.depth);
     }
 }
 
 void prep_core(cnf<indexed_clause*>& matrix, ProgParams& progParams) {
-    assert(progParams.Mode == Core);
+    assert(progParams.mode == Core);
     for (int c = 0; c < matrix.size(); c++) {
         progParams.priority.push_back(0);
         if (matrix[c]->Conjecture)
@@ -160,9 +160,9 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
     string content((istreambuf_iterator<char>(input)), istreambuf_iterator<char>());
     input.close();
 
-    if (progParams.Preprocess) {
+    if (progParams.preprocess) {
 #if !defined(_WIN32) && !defined(_WIN64)
-        content = ConvertByVampire(content, progParams.Format == TPTP);
+        content = ConvertByVampire(content, progParams.format == TPTP);
 #else
         cout << "Preprocessing is not supported on Windows" << endl;
         exit(130);
@@ -226,28 +226,28 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
 
     auto smallestClauseSet = posClauses.size() < negClauses.size() ? posClauses : negClauses;
 
-    if (progParams.Conjectures == Auto)
-        progParams.Conjectures =
+    if (progParams.conjectures == Auto)
+        progParams.conjectures =
                 conjectureCnt > 1 &&
                 (unsigned)log2((double)conjectureCnt) > smallestClauseSet.size() ? Min : Keep;
-    if (conjectureCnt == 0 && progParams.Conjectures == Keep)
-        progParams.Conjectures = Min;
+    if (conjectureCnt == 0 && progParams.conjectures == Keep)
+        progParams.conjectures = Min;
 
-    assert(progParams.Conjectures != Auto);
+    assert(progParams.conjectures != Auto);
 
     std::vector<indexed_clause*> new_conj;
 
-    if (progParams.Conjectures == Pos)
+    if (progParams.conjectures == Pos)
         new_conj = std::move(posClauses);
-    else if (progParams.Conjectures == Neg)
+    else if (progParams.conjectures == Neg)
         new_conj = std::move(negClauses);
-    else if (progParams.Conjectures == Min)
+    else if (progParams.conjectures == Min)
         new_conj = std::move(smallestClauseSet);
     else {
-        assert(progParams.Conjectures == Keep);
+        assert(progParams.conjectures == Keep);
     }
 
-    if (progParams.Conjectures != Keep) {
+    if (progParams.conjectures != Keep) {
         for (unsigned i = 0; i < cnf.size(); i++) {
             cnf[i]->Conjecture = false;
         }
@@ -267,21 +267,21 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         std::flush(cout);
     }
 
-    if (progParams.Mode == Rectangle) {
+    if (progParams.mode == Rectangle) {
         prep_rect(cnf, progParams);
     }
     else {
-        assert (progParams.Mode == Core);
+        assert (progParams.mode == Core);
         prep_core(cnf, progParams);
     }
 
-    if (progParams.CheckProof)
+    if (progParams.checkProof)
         adtSolver.make_z3_adt(context);
 
-    int64_t timeLeft = progParams.Timeout == 0 ? INT_MAX : progParams.Timeout;
+    int64_t timeLeft = progParams.timeout == 0 ? INT_MAX : progParams.timeout;
     auto* propagator = new matrix_propagator(cnf, adtSolver, progParams, literalCnt, (unsigned)timeLeft);
 
-    for (unsigned id = progParams.Depth; id < progParams.MaxDepth; id++) {
+    for (unsigned id = progParams.depth; id < progParams.maxDepth; id++) {
         start_watch(level_time);
         // TODO
         // parameters.set("smt.restart_factor", 1.0);
@@ -291,7 +291,6 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
 
         tri_state res;
         try {
-            propagator->Running = true;
             propagator->assert_root();
             res = propagator->check();
         }
@@ -299,7 +298,6 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
             cout << "Error: " << ex.what() << endl;
             exit(130);
         }
-        propagator->Running = false;
 
 #ifdef DIMACS
         string dimacs = propagator->get_dimacs();
@@ -319,7 +317,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
                 deleteCNF(cnf);
                 return undef;
             }
-            if (id >= progParams.MaxDepth) {
+            if (id >= progParams.maxDepth) {
                 if (!silent)
                     cout << "Reached depth limit" << endl;
                 deleteCNF(cnf);

@@ -236,7 +236,7 @@ term_instance* term::get_instance(unsigned cpy, matrix_propagator& propagator) c
     return instances[cpy];
 }
 
-bool term::SeemsPossiblyUnifiable(const term* rhs, subterm_hint& hint) const {
+bool term::seems_possibly_unifiable(const term* rhs, subterm_hint& hint) const {
     // TODO: Just create the equality axiom and check if it is false (cached anyway as well)
     if (FuncID < 0 || rhs->FuncID < 0) {
         hint.add(this, rhs);
@@ -256,7 +256,7 @@ bool term::SeemsPossiblyUnifiable(const term* rhs, subterm_hint& hint) const {
     assert(Args.size() == rhs->Args.size());
 
     for (int i = 0; i < Args.size(); i++) {
-        if (!Args[i]->SeemsPossiblyUnifiable(rhs->Args[i], hint))
+        if (!Args[i]->seems_possibly_unifiable(rhs->Args[i], hint))
             return false;
     }
     return true;

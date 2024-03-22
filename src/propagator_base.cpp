@@ -1,7 +1,9 @@
 #include "matrix_propagator.h"
+#include "CadicalWrapper.h"
+#include "Z3Wrapper.h"
 #include <iostream>
 
-unsigned propagator_base::getRandom(unsigned min, unsigned max) const {
+unsigned propagator_base::get_random(unsigned min, unsigned max) const {
     assert(max > min);
     unsigned res = distribution(generator);
     unsigned span = max - min;
@@ -9,13 +11,21 @@ unsigned propagator_base::getRandom(unsigned min, unsigned max) const {
 }
 
 propagator_base::propagator_base(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt, unsigned timeLeft)
-    : CaDiCal_propagator(timeLeft), term_solver(adtSolver), generator(0), progParams(progParams), matrix(cnf), unificationHints(literalCnt) {
-
-#ifdef DIMACS
-    dimacs << "c depth " << progParams.Depth << '\n';
-#endif
+    : z3Propagator(progParams.smt ? z3_propagator::create(this, timeLeft) : nullptr), cadicalPropagator(!progParams.smt ? new CaDiCal_propagator(this, timeLeft) : nullptr),
+    term_solver(adtSolver), m(z3Propagator != nullptr ? z3Propagator->m : cadicalPropagator->m), generator(0), progParams(progParams), matrix(cnf), unificationHints(literalCnt)
+     {
 
     term_solver.reset((matrix_propagator*)this);
+}
+
+propagator_base::~propagator_base() {
+    z3::context* ctx = nullptr;
+    if (z3Propagator != nullptr) {
+        ctx = &z3Propagator->get_ctx();
+        delete z3Propagator;
+        delete ctx;
+    }
+    delete cadicalPropagator;
 }
 
 large_array::large_array(unsigned size) : size(size) {
@@ -62,8 +72,8 @@ void large_array::set(unsigned i, unsigned j, const subterm_hint* hint) {
     large->insert(make_pair(make_pair(i, j), hint));
 }
 
-void subterm_hint::GetPosConstraints(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2, vector<formula>& constraints) const {
-    auto [lhsCpy, rhsCpy] = GetCpyIdx(l1, l2);
+void subterm_hint::get_pos_constraints(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2, vector<formula>& constraints) const {
+    auto [lhsCpy, rhsCpy] = get_cpy_idx(l1, l2);
     for (auto [lhs, rhs]: equalities) {
         formula e = propagator.term_solver.make_equality_expr(lhs->get_instance(lhsCpy, propagator), rhs->get_instance(rhsCpy, propagator));
         if (e->is_false()) {
@@ -77,8 +87,8 @@ void subterm_hint::GetPosConstraints(matrix_propagator& propagator, const ground
     }
 }
 
-formula subterm_hint::GetNegConstraints(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2) const {
-    auto [lhsCpy, rhsCpy] = GetCpyIdx(l1, l2);
+formula subterm_hint::get_neg_constraints(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2) const {
+    auto [lhsCpy, rhsCpy] = get_cpy_idx(l1, l2);
     vector<formula_term*> orList;
     for (const auto& [lhs, rhs] : equalities) {
         formula e = propagator.term_solver.make_equality_expr(lhs->get_instance(lhsCpy, propagator), rhs->get_instance(rhsCpy, propagator));
@@ -91,8 +101,8 @@ formula subterm_hint::GetNegConstraints(matrix_propagator& propagator, const gro
     return propagator.m.mk_or(orList);
 }
 
-bool subterm_hint::IsSatisfied(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2) const {
-    auto [lhsCpy, rhsCpy] = GetCpyIdx(l1, l2);
+bool subterm_hint::is_satisfied(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2) const {
+    auto [lhsCpy, rhsCpy] = get_cpy_idx(l1, l2);
     for (const auto& [lhs, rhs]: equalities) {
         if (!complex_adt_solver::are_equal(lhs->get_instance(lhsCpy, propagator), rhs->get_instance(rhsCpy, propagator)))
             return false;
@@ -100,7 +110,7 @@ bool subterm_hint::IsSatisfied(matrix_propagator& propagator, const ground_liter
     return true;
 }
 
-subterm_hint* propagator_base::CollectConstrainUnifiable(const ground_literal& l1, const indexed_literal& l2) {
+subterm_hint* propagator_base::collect_constrain_unifiable(const ground_literal& l1, const indexed_literal& l2) {
     // l1 has to be ground; otw. P(:auto 0) [l1] and P(:auto 0) [l2] would say that they are always equal
     auto* hint = new subterm_hint();
     unsigned arity = l1.arity();
@@ -108,7 +118,7 @@ subterm_hint* propagator_base::CollectConstrainUnifiable(const ground_literal& l
     for (unsigned i = 0; i < arity; i++) {
         const term* lhs = l1.lit->arg_bases[i];
         const term* rhs = l2.arg_bases[i];
-        if (!lhs->SeemsPossiblyUnifiable(rhs, *hint)) {
+        if (!lhs->seems_possibly_unifiable(rhs, *hint)) {
             delete hint;
             return nullptr;
         }
@@ -121,7 +131,7 @@ const subterm_hint* propagator_base::cache_unification(const ground_literal& l1,
     if (hint != nullptr)
         return hint;
     if (l1.lit->nameID == l2.nameID &&
-        (hint = CollectConstrainUnifiable(l1, l2)) != nullptr) {
+        (hint = collect_constrain_unifiable(l1, l2)) != nullptr) {
 
         unificationHints.set(l1.lit->Index, l2.Index, hint);
         if (l2.Index != l1.lit->Index)

@@ -117,7 +117,7 @@ public:
 
     term_instance* get_instance(unsigned cpy, matrix_propagator& propagator) const;
 
-    bool SeemsPossiblyUnifiable(const term* rhs, subterm_hint& hint) const;
+    bool seems_possibly_unifiable(const term* rhs, subterm_hint& hint) const;
 
     int compare_to(const term* other) const {
         return this == other ? 0 : (id() < other->id() ? -1 : id() > other->id() ? 1 : 0);

@@ -33,6 +33,7 @@ endif()
 
 add_executable(UPCoP
         CadicalWrapper.cpp
+        Z3Wrapper.cpp
         CLIParser.cpp
         ConnectionCalculus.cpp
         utils.cpp
@@ -47,6 +48,7 @@ add_executable(UPCoP
         fo_literal.h
         ground_literal.cpp
         ground_literal.h
+        formula.cpp
 )
 
 target_link_libraries(UPCoP PRIVATE ${Z3_LIB})

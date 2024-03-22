@@ -1,355 +1,16 @@
 #pragma once
 
 #include "cadical.hpp"
-#include "utils.h"
+#include "formula.h"
 
 #include <chrono>
 
-#ifndef NDEBUG
-extern std::unordered_map<unsigned, std::string> names;
-inline void reset_names() {
-    names.clear();
-}
-#ifndef NOLOG
-#include <iostream>
-#define Log(s) do { std::cout << s; } while (false)
-#define LogN(s) Log(s << std::endl)
-#else
-#define Log(s) do { } while (false)
-#define LogN(s) Log(s)
-#endif
-#define OPT(X) X
-#else
-inline void reset_names() {
-}
-#define Log(s) do { } while (false)
-#define LogN(s) Log(s)
-#define OPT(X)
-#endif
-
-class CaDiCal_propagator;
-class formula_term;
-class true_term;
-class false_term;
-class literal_term;
-class not_term;
-class and_term;
-class or_term;
-
-typedef literal_term* literal;
-typedef formula_term* formula;
-
-namespace std {
-    template<>
-    struct hash<literal_term*> {
-        size_t operator()(const literal_term* const x) const;
-    };
-
-    template<>
-    struct equal_to<literal_term*> {
-        bool operator()(const literal_term* const x, const literal_term* const y) const;
-    };
-
-    template<>
-    struct hash<std::vector<formula_term*>> {
-        size_t operator()(const std::vector<formula_term*>& x) const;
-    };
-
-    template<>
-    struct equal_to<std::vector<formula_term*>> {
-        bool operator()(const std::vector<formula_term*>& x, const std::vector<formula_term*>& y) const;
-    };
-}
-
-class formula_manager {
-    friend class formula_term;
-    friend class CaDiCal_propagator;
-    CaDiCal_propagator* propagator;
-    true_term* trueTerm;
-    false_term* falseTerm;
-
-    std::vector<formula_term*> id_to_formula;
-    std::vector<literal_term*> cadical_to_formula;
-    std::vector<literal_term*> neg_cadical_to_formula;
-
-    std::unordered_map<formula_term*, formula_term*> not_cache;
-    std::unordered_map<std::vector<formula_term*>, and_term*> and_cache;
-    std::unordered_map<std::vector<formula_term*>, or_term*> or_cache;
-
-public:
-
-    true_term* mk_true() const;
-
-    false_term* mk_false() const;
-
-    literal_term* mk_lit(unsigned v, bool neg);
-
-    literal_term* mk_lit(signed v);
-
-    literal_term* mk_not(literal_term* c);
-    formula_term* mk_not(formula_term* c);
-
-    formula_term* mk_or(std::vector<formula_term*> c, bool positive = false);
-    formula_term* mk_and(std::vector<formula_term*> c, bool positive = false);
-
-#ifndef NDEBUG
-    formula_term* mk_or_slow(const std::vector<literal_term*>& c){
-        return mk_or(std::vector<formula_term*>(c.begin(), c.end()));
-    }
-
-    formula_term* mk_and_slow(const std::vector<literal_term*>& c) {
-        return mk_and(std::vector<formula_term*>(c.begin(), c.end()));
-    }
-#endif
-
-    formula_manager(CaDiCal_propagator* propagator);
-    ~formula_manager();
-
-    void register_formula(formula_term* term);
-};
-
-#ifndef PUSH_POP
-constexpr bool active = true;
-#endif
-
-struct clause_instance;
-
-class formula_term {
-
-    const unsigned ast_id;
-    tri_state final_interpretation = undef;
-
-protected:
-
-#ifdef PUSH_POP
-    bool active = false;
-#endif
-
-    formula_manager& manager;
-    int var_id = 0;
-
-    explicit formula_term(formula_manager& manager) : ast_id(manager.id_to_formula.size()), manager(manager) {
-        manager.register_formula(this);
-    }
-
-public:
-
-    struct connection_tseitin {
-        literal sideCondition;
-        clause_instance* c1;
-        clause_instance* c2;
-    };
-
-    vector<connection_tseitin> connections; // If true: The two clauses are linked (because of root simplifications, a single formula can link more two clauses)
-
-    virtual ~formula_term() = default;
-
-    virtual bool is_literal() const {
-        return false;
-    }
-
-    inline unsigned get_ast_id() const {
-        return ast_id;
-    }
-
-    inline int get_var_id() const {
-        return var_id;
-    }
-
-    inline tri_state get_fixed() const {
-        return final_interpretation;
-    }
-
-    inline void fix(bool t) {
-        assert(final_interpretation == undef);
-        final_interpretation = t ? sat : unsat;
-    }
-
-    inline bool is_true() const {
-        return final_interpretation == sat;
-    }
-
-    inline bool is_false() const {
-        return final_interpretation == unsat;
-    }
-
-    virtual std::string to_string() const = 0;
-
-    // first:  0 -> just create a new variable and return it
-    // first:  1 -> inline the variable positively
-    // first: -1 -> inline the variable negatively
-    virtual const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) = 0;
-
-    virtual formula_term* negate() = 0;
-};
-
-class literal_term : public formula_term {
-    const std::string name;
-
-public:
-
-    literal_term(formula_manager& m, unsigned l, bool neg) : formula_term(m)
-#ifndef NDEBUG
-                                                             , name((neg ? "!" : "") + names.at(l))
-#endif
-                                                             {
-        var_id = (signed) l * (neg ? -1 : 1);
-    }
-
-    literal_term(formula_manager& m, signed l) : formula_term(m)
-#ifndef NDEBUG
-                                                            , name((l < 0 ? "!" : "") + names.at(abs(l)))
-#endif
-                                                            {
-        var_id = l;
-    }
-
-    bool is_literal() const final {
-        return true;
-    }
-
-    int get_lit() const {
-        return var_id;
-    }
-
-    std::string to_string() const override {
-        return name;
-    }
-
-    const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) override;
-
-    formula_term* negate() override {
-        return manager.mk_lit(-var_id);
-    }
-};
-
-struct false_term : public literal_term {
-    false_term(formula_manager& m) : literal_term(m, 0, true) {}
-
-    std::string to_string() const final { return "false"; }
-
-    const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) final {
-        return nullptr;
-    }
-
-    formula_term* negate() final {
-        return (formula_term*)manager.mk_true();
-    }
-};
-
-struct true_term : public literal_term {
-    true_term(formula_manager& m) : literal_term(m, 0, false) {}
-
-    std::string to_string() const final { return "true"; }
-
-    const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) final {
-        return nullptr;
-    }
-
-    formula_term* negate() final {
-        return (formula_term*)manager.mk_false();
-    }
-};
-
-class not_term : public formula_term {
-    formula_term* t;
-    const std::string name;
-
-public:
-
-    explicit not_term(formula_manager& m, formula_term* t) : formula_term(m), t(t), name("!" + t->to_string()) {}
-
-    std::string to_string() const final {
-        return name;
-    }
-
-    const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) override;
-
-    formula_term* negate() final {
-        return t;
-    }
-};
-
-class complex_term : public formula_term {
-
-protected:
-
-    const std::vector<formula_term*> args;
-    const bool positive;
-
-public:
-
-    bool is_positive() const {
-        return positive;
-    }
-
-    const std::vector<formula_term*>& get_args() const {
-        return args;
-    }
-
-    // TODO: Check if positive really makes a difference
-    explicit complex_term(formula_manager& m, std::vector<formula_term*> args, bool positive) :
-                                                                formula_term(m), args(std::move(args)), positive(positive) {
-        assert(this->args.size() > 1);
-    }
-};
-
-class and_term : public complex_term {
-    const std::string name;
-
-public:
-    explicit and_term(formula_manager& m, std::vector<formula_term*> args, bool positive) :
-                                                                complex_term(m, std::move(args), positive),
-                                                                name(string_join(this->args, " && ")) {
-    }
-
-    std::string to_string() const final {
-        return name;
-    }
-
-    const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) override;
-
-    formula_term* negate() final {
-        vector<formula_term*> negated;
-        negated.reserve(args.size());
-        for (auto* arg : args) {
-            negated.push_back(arg->negate());
-        }
-        return manager.mk_or(negated);
-    }
-};
-
-class or_term : public complex_term {
-    const std::string name;
-
-public:
-    explicit or_term(formula_manager& m, std::vector<formula_term*> args, bool positive) :
-                                                               complex_term(m, std::move(args), positive), name(string_join(this->args, " || ")) {
-    }
-
-    std::string to_string() const final {
-        return name;
-    }
-
-    const literal_term* get_lits(CaDiCal_propagator& propagator, std::vector<std::vector<int>>& aux) override;
-
-    formula_term* negate() final {
-        vector<formula_term*> negated;
-        negated.reserve(args.size());
-        for (auto* arg : args) {
-            negated.push_back(arg->negate());
-        }
-        return manager.mk_and(negated);
-    }
-};
-
-typedef std::function<void()> action;
+class propagator_base;
 
 class CaDiCal_propagator : public CaDiCaL::ExternalPropagator, public CaDiCaL::Terminator, public CaDiCaL::FixedAssignmentListener {
     friend class formula_manager;
 
-protected:
-    std::vector<action> undo_stack;
+    propagator_base* const base;
 
 #ifdef DIMACS
     std::stringstream dimacs;
@@ -361,7 +22,6 @@ private:
 
     int var_cnt = 0;
     std::vector<unsigned> undo_stack_limit;
-    unsigned decision_level = 0;
 
     unsigned pending_hard_propagations_idx = 0;
     unsigned hard_propagation_read_idx = 0;
@@ -385,21 +45,10 @@ private:
 protected:
     std::vector<bool> interpreted;
 
-    bool is_conflict_flag = false;
-
 public:
-
-    bool is_conflict() const {
-        return is_conflict_flag;
-    }
 
     CaDiCaL::Solver* solver = nullptr;
     formula_manager m;
-
-    inline void add_undo(const action& action) {
-        assert(solver->state() == CaDiCaL::SOLVING);
-        undo_stack.push_back(action);
-    }
 
     tri_state check() {
         switch (solver->solve()) {
@@ -439,12 +88,10 @@ public:
 
     bool soft_propagate(const std::vector<literal>& just, literal prop);
 
-protected:
-
-    CaDiCal_propagator(unsigned timeLeft);
+    CaDiCal_propagator(propagator_base* base, unsigned timeLeft);
     ~CaDiCal_propagator();
 
-    bool get_value(literal v, bool& value) const {
+    inline bool get_value(literal v, bool& value) const {
         tri_state val = interpretation[abs(v->get_lit()) - 1];
         if (val == undef)
             return false;
@@ -452,8 +99,31 @@ protected:
         return true;
     }
 
-    bool has_value(literal v) const {
+    inline bool has_value(literal v) const {
         return interpretation[abs(v->get_lit()) - 1] != undef;
+    }
+
+    inline bool is_skip(literal v) const {
+        return !interpreted[abs(v->get_lit()) - 1];
+    }
+
+    inline void assume(literal v) const {
+        solver->assume(v->get_lit());
+    }
+
+    inline void add_assertion(literal v) const {
+        solver->clause(v->get_lit());
+    }
+
+    inline void add_assertion(vector<literal> v) const {
+        for (literal l : v) {
+            solver->add(l->get_lit());
+        }
+        solver->add(0);
+    }
+
+    inline bool failed(literal v) const {
+        return solver->failed(v->get_lit());
     }
 
     int new_var_raw(bool is_interesting) {
@@ -467,7 +137,6 @@ protected:
         return newId;
     }
 
-public:
 #ifndef NDEBUG
 
     inline int new_observed_var(const std::string& name) {
@@ -510,8 +179,6 @@ public:
 
 protected:
 
-    virtual void fixed(literal lit, bool value) = 0;
-
     void notify_assignment(const vector<int>& lits) final;
 
     void notify_fixed_assignment(int id) final;
@@ -524,21 +191,13 @@ protected:
 
     void notify_backtrack(size_t new_level) final;
 
-    virtual void final() = 0;
-
     bool cb_check_found_model(const std::vector<int>& model) final;
 
     int cb_propagate() final;
 
     int cb_add_reason_clause_lit(int propagated_lit) final;
 
-protected:
-
     bool cb_has_external_clause(bool& is_forgettable) final;
 
     int cb_add_external_clause_lit() final;
-
-    int cb_decide() final;
-
-    virtual literal decide() = 0;
 };
