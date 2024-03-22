@@ -263,7 +263,7 @@ void matrix_propagator::assert_root() {
     dimacs << "0\n";
 #endif
 
-    if (z3Propagator != nullptr) {
+    if (z3Propagator != nullptr && progParams.mode == Rectangle) {
         z3::expr_vector rootExpr(z3Propagator->get_ctx());
 
         rootExpr.resize(allClauses.size());

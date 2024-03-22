@@ -49,11 +49,12 @@ public:
     tri_state check() {
         core.clear();
         coreQueried = false;
-        switch (s->check(assumptions)) {
+        auto res = s->check(assumptions);
+        assumptions.resize(0);
+        switch (res) {
             case z3::sat:
                 return sat;
             case z3::unsat:
-                assumptions.resize(0);
                 return unsat;
             default:
                 return undef;
