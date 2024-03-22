@@ -53,6 +53,7 @@ public:
             case z3::sat:
                 return sat;
             case z3::unsat:
+                assumptions.resize(0);
                 return unsat;
             default:
                 return undef;
