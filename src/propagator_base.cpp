@@ -15,14 +15,20 @@ propagator_base::propagator_base(cnf<indexed_clause*>& cnf, complex_adt_solver& 
     term_solver(adtSolver), m(z3Propagator != nullptr ? z3Propagator->m : cadicalPropagator->m), generator(0), progParams(progParams), matrix(cnf), unificationHints(literalCnt)
      {
 
-    term_solver.reset((matrix_propagator*)this);
+    term_solver.set((matrix_propagator*)this);
+    if (z3Propagator != nullptr)
+        adtSolver.make_z3_us(z3Propagator->get_ctx());
 }
 
 propagator_base::~propagator_base() {
-    z3::context* ctx = nullptr;
+    term_solver.clear();
     if (z3Propagator != nullptr) {
+        z3::context* ctx;
+        z3::solver* s;
         ctx = &z3Propagator->get_ctx();
+        s = &z3Propagator->get_solver();
         delete z3Propagator;
+        delete s;
         delete ctx;
     }
     delete cadicalPropagator;

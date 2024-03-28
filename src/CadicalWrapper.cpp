@@ -52,20 +52,23 @@ void CaDiCal_propagator::output_literals(const std::vector<literal>& lit) const 
 
 static unsigned incCnt = 0;
 
-void CaDiCal_propagator::propagate_conflict(const std::vector<literal>& just) {
+void CaDiCal_propagator::propagate_conflict(const justification& just) {
+    assert(just.diseqJust.first == nullptr && just.diseqJust.second == nullptr);
     if (base->is_conflict())
         return;
     // assert(just.size() > 1); // No general problem with that, but this looks suspicious...
     base->set_conflict();
+    vector<literal> lits;
+    just.resolve_justification(*base, lits);
 #ifndef NDEBUG
     Log("conflict (hard) [" << incCnt++ << "]: ");
-    output_literals(just);
+    output_literals(lits);
     LogN("");
 #endif
 
     std::vector<int> aux;
-    aux.reserve(just.size());
-    for (literal k: just) {
+    aux.reserve(lits.size());
+    for (literal k : lits) {
         if (k->is_true())
             continue;
         aux.push_back(-k->get_lit());
@@ -81,7 +84,8 @@ void CaDiCal_propagator::propagate_conflict(const std::vector<literal>& just) {
     pending_hard_propagations.emplace_back(std::move(aux));
 }
 
-bool CaDiCal_propagator::hard_propagate(const std::vector<literal>& just, formula prop) {
+bool CaDiCal_propagator::hard_propagate(const justification& just, formula prop) {
+    assert(just.diseqJust.first == nullptr && just.diseqJust.second == nullptr);
     if (base->is_conflict())
         return false;
     if (prop->is_true())
@@ -90,9 +94,13 @@ bool CaDiCal_propagator::hard_propagate(const std::vector<literal>& just, formul
         propagate_conflict(just);
         return false;
     }
+
+    vector<literal> lits;
+    just.resolve_justification(*base, lits);
+
 #ifndef NDEBUG
     Log("Propagating (hard) [" << incCnt++ << "]: ");
-    output_literals(just);
+    output_literals(lits);
     Log(" => ");
     LogN(prop->to_string());
 #endif
@@ -100,9 +108,9 @@ bool CaDiCal_propagator::hard_propagate(const std::vector<literal>& just, formul
     std::vector<std::vector<int>> aux;
     const literal_term* c = prop->get_lits(*base, aux);
     aux.emplace_back();
-    aux.back().reserve(just.size());
+    aux.back().reserve(lits.size());
     aux.back().push_back(c->get_lit());
-    for (literal k: just) {
+    for (literal k : lits) {
         if (k->is_true())
             continue;
         aux.back().push_back(-k->get_lit());
@@ -135,9 +143,8 @@ bool CaDiCal_propagator::hard_propagate(const std::vector<literal>& just, formul
     return true;
 }
 
-std::vector<literal> j;
-
-bool CaDiCal_propagator::soft_propagate(const std::vector<literal>& just, literal prop) {
+bool CaDiCal_propagator::soft_propagate(const justification& just, literal prop) {
+    assert(just.diseqJust.first == nullptr && just.diseqJust.second == nullptr);
     if (base->is_conflict())
         return false;
     if (prop->is_true())
@@ -149,30 +156,31 @@ bool CaDiCal_propagator::soft_propagate(const std::vector<literal>& just, litera
     if (!soft_justifications[literal_to_idx(prop->get_lit())].empty())
         // Already propagated
         return true;
+
     bool val = false;
     if (get_value(prop, val)) {
         if ((prop->get_lit() > 0) == val)
             // Already assigned
             return true;
-        std::vector<literal> just2;
-        just2.reserve(just.size() + 1);
-        add_range(just2, just);
-        just2.push_back(m.mk_not(prop));
+        justification just2 = just;
+        just2.add_literal(m.mk_not(prop));
         propagate_conflict(just2);
         return false;
     }
 
-        // TODO: Check if it is pending (not sure it is worth it...)
+    vector<literal> lits;
+    just.resolve_justification(*base, lits);
+
 #ifndef NDEBUG
     Log("Propagating (soft) [" << incCnt++ << "]: ");
-    output_literals(just);
+    output_literals(lits);
     Log(" => ");
     LogN(prop->to_string() << " [" << prop->get_lit() << "]");
 #endif
 
     std::vector<int> j;
-    j.reserve(just.size() + 1);
-    for (literal k: just) {
+    j.reserve(lits.size() + 1);
+    for (literal k : lits) {
         if (k->is_true())
             continue;
         j.push_back(-k->get_lit());
@@ -218,6 +226,8 @@ static unsigned fixedCnt = 0;
 
 void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
     for (int lit : lits) {
+        if (base->is_conflict())
+            return;
         bool value = lit > 0;
 
         const unsigned id = abs(lit);
@@ -236,8 +246,6 @@ void CaDiCal_propagator::notify_assignment(const vector<int>& lits) {
         });
 
         base->fixed(v, value);
-        if (base->is_conflict())
-            return;
     }
 }
 
@@ -310,10 +318,9 @@ bool CaDiCal_propagator::cb_check_found_model(const std::vector<int>& model) {
         }
         if (i < pending_soft_propagations.size()) {
             std::cout << "Conflict found - translate it to a hard propagation" << std::endl;
-            std::vector<literal> just;
-            just.reserve(pending_soft_propagations[i].first.size());
+            justification just(pending_soft_propagations[i].first.size());
             for (unsigned j = 0; j < pending_soft_propagations[i].first.size() - 1; j++) {
-                just.push_back(m.mk_lit(pending_soft_propagations[i].first[j]));
+                just.add_literal(m.mk_lit(pending_soft_propagations[i].first[j]));
             }
             hard_propagate(just, m.mk_lit(pending_soft_propagations[i].first.back()));
             return false;

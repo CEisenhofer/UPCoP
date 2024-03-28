@@ -1,10 +1,11 @@
 #pragma once
-#include "CadicalWrapper.h"
+#include "formula.h"
 #include <stack>
 
 struct term;
 struct term_instance;
 struct simple_adt_solver;
+struct complex_adt_solver;
 struct subterm_hint;
 struct propagator_base;
 struct matrix_propagator;
@@ -74,7 +75,7 @@ class term : public raw_term {
 
 public:
 
-    simple_adt_solver& Solver;
+    simple_adt_solver& solver;
 
 #ifndef NDEBUG
 private:
@@ -139,6 +140,15 @@ struct justification {
 
     vector<literal> litJust;
     vector<pair<term_instance*, term_instance*>> eqJust;
+    pair<term_instance*, term_instance*> diseqJust; // for Z3 we have to move diseq justification to the RHS
+
+    justification() = default;
+
+    justification(unsigned res) {
+        litJust.reserve(res);
+    }
+
+    justification(literal lit) : litJust { lit } { }
 
     void add_literal(literal lit) {
         litJust.push_back(lit);
@@ -166,12 +176,14 @@ struct justification {
         add_range(eqJust, other.eqJust);
     }
 
+    void clear() {
+        litJust.clear();
+        eqJust.clear();
+    }
+
     string to_string() const;
 
-    void resolve_justification(simple_adt_solver* adtSolver, vector<literal>& just,
-                               unordered_map<term_instance*, unsigned>& termInstance, vector<unsigned>& parent) const;
-
-    void resolve_justification(simple_adt_solver* adtSolver, vector<literal>& just) const;
+    void resolve_justification(propagator_base& propagator, vector<literal>& just) const;
 
     bool empty() const {
         return litJust.empty() && eqJust.empty();
@@ -199,6 +211,7 @@ struct Lazy {
 
     Lazy() = default;
     Lazy(term_instance* lhs, term_instance* rhs) : LHS(lhs), RHS(rhs) { }
+    Lazy(term_instance* lhs, term_instance* rhs, justification just) : LHS(lhs), RHS(rhs), just(just) { }
 };
 
 struct less_than {
@@ -252,10 +265,10 @@ struct disequality {
 
     term_instance* LHS = nullptr;
     term_instance* RHS = nullptr;
-    literal just;
+    justification just;
 
     disequality() = default;
-    disequality(term_instance* lhs, term_instance* rhs, literal just);
+    disequality(term_instance* lhs, term_instance* rhs, justification just);
 
 #ifndef NDEBUG
     string to_string() const;
@@ -287,6 +300,8 @@ struct term_instance {
     unsigned cnt = 1;
 
     unsigned marked = 0;
+
+    optional<z3::expr> z3_expr;
 
     // PO node
     vector<pair<term_instance*, literal>> smaller;
@@ -361,7 +376,9 @@ public:
         return t->pretty_print(cpy_idx(), prettyNames);
     }
 
-    z3::expr to_z3(matrix_propagator& propagator, z3::context& context, unordered_map<term_instance*, optional<z3::expr>>& map, vector<term_instance*>& terms);
+    z3::expr to_z3_us();
+
+    z3::expr to_z3_adt(matrix_propagator& propagator, z3::context& context, unordered_map<term_instance*, optional<z3::expr>>& map, vector<term_instance*>& terms);
 
     const term* fully_expand(matrix_propagator& propagator);
 };

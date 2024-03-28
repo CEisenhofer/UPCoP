@@ -82,11 +82,11 @@ public:
     void output_literals(const std::vector<literal>& lit) const;
 #endif
 
-    void propagate_conflict(const std::vector<literal>& just);
+    void propagate_conflict(const justification& just);
 
-    bool hard_propagate(const std::vector<literal>& just, formula prop);
+    bool hard_propagate(const justification& just, formula prop);
 
-    bool soft_propagate(const std::vector<literal>& just, literal prop);
+    bool soft_propagate(const justification& just, literal prop);
 
     CaDiCal_propagator(propagator_base* base, unsigned timeLeft);
     ~CaDiCal_propagator();

@@ -186,8 +186,8 @@ void matrix_propagator::check_proof(z3::context& ctx) {
             for (const term* t : l.lit->arg_bases) {
                 term_instance* inst = t->get_instance(l.copyIdx, *this);
                 terms.push_back(inst);
-                args.push_back(inst->to_z3(*this, ctx, lookup, allTerms));
-                argSorts.push_back(inst->t->Solver.get_z3_sort());
+                args.push_back(inst->to_z3_adt(*this, ctx, lookup, allTerms));
+                argSorts.push_back(inst->t->solver.get_z3_adt_sort());
             }
             z3::expr e = ctx.function(l.lit->name.c_str(), argSorts, ctx.bool_sort())(args);
             if (!l.lit->polarity)
@@ -202,7 +202,7 @@ void matrix_propagator::check_proof(z3::context& ctx) {
         term_instance* pair = allTerms[i];
         if (pair->is_root() || !(pair->t->is_var()))
             continue;
-        z3Solver.add(pair->to_z3(*this, ctx, lookup, allTerms) == pair->find_root(*this)->to_z3(*this, ctx, lookup, allTerms));
+        z3Solver.add(pair->to_z3_adt(*this, ctx, lookup, allTerms) == pair->find_root(*this)->to_z3_adt(*this, ctx, lookup, allTerms));
     }
 
 
@@ -281,7 +281,7 @@ void matrix_propagator::pb_clause_limit() {
         return;
 
     start_watch(pb_time);
-    static vector<literal> just;
+    static justification just;
     static vector<literal> prop;
 
     bool upperLimit = chosen.size() == lvl;
@@ -294,12 +294,11 @@ void matrix_propagator::pb_clause_limit() {
         add_undo([this]() { pbPropagated = false; });
         just.clear();
         prop.clear();
-        just.reserve(chosen.size());
         prop.reserve(allClauses.size() - (chosen.size() + not_chosen.size()));
 
         for (auto* clause : allClauses) {
             if (clause->value == sat)
-                just.push_back(clause->selector);
+                just.add_literal(clause->selector);
             else if (clause->value == undef)
                 prop.push_back(m.mk_not(clause->selector));
         }
@@ -315,12 +314,11 @@ void matrix_propagator::pb_clause_limit() {
         add_undo([this]() { pbPropagated = false; });
         just.clear();
         prop.clear();
-        just.reserve(not_chosen.size());
         prop.reserve(allClauses.size() - (chosen.size() + not_chosen.size()));
 
         for (auto* clause : allClauses) {
             if (clause->value == unsat)
-                just.push_back(m.mk_not(clause->selector));
+                just.add_literal(m.mk_not(clause->selector));
             else if (clause->value == undef)
                 prop.push_back(clause->selector);
         }
@@ -334,8 +332,6 @@ void matrix_propagator::pb_clause_limit() {
 }
 
 void matrix_propagator::fixed(literal_term* e, bool value) {
-    if (is_conflict())
-        return;
     try {
 
         if (value && false) {
@@ -413,7 +409,8 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
         if (info->copyIdx > 0) {
             auto val = cachedClauses[c][info->copyIdx - 1]->value;
             if (val != sat) {
-                if (!soft_propagate({ e }, get_ground(info->clause, info->copyIdx - 1)->selector))
+                justification just(e);
+                if (!soft_propagate(just, get_ground(info->clause, info->copyIdx - 1)->selector))
                     return;
             }
 
@@ -431,7 +428,8 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
                 term_solver.preprocess_less(std::move(stack), subproblems, eq);
                 assert(!subproblems.empty());
                 formula expr = term_solver.make_less_expr(subproblems, eq);
-                hard_propagate({ e }, expr); // don't remove justification
+                justification just(e);
+                hard_propagate(just, expr); // don't remove justification
                 stop_watch(var_order_time);
 #ifndef PUSH_POP
             }
@@ -471,8 +469,10 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
                         // clause->TautologyConstraints->emplace_back(k, l, diseq);
 
                         formula neq = diseq->get_neg_constraints(*this, info->literals[k], info->literals[l]);
-                        if (!neq->is_true())
+                        if (!neq->is_true()) {
+                            justification just(e);
                             hard_propagate({ e }, neq); /* we need e as a justification; otherwise a tautology clause would result in a root conflict */
+                        }
                         delete diseq;
                     }
                 }
@@ -487,6 +487,11 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
 #endif
 
         pb_clause_limit();
+    }
+    catch (z3::exception& ex) {
+        cout << "Crashed Z3: " << ex.msg() << endl;
+        __builtin_trap();
+        exit(131);
     }
     catch (...) {
         cout << "Crashed" << endl;
@@ -505,7 +510,7 @@ bool matrix_propagator::delayed_rp(clause_instance* info) {
         try {
             assert(eq.just.litJust.size() == 1 && eq.just.eqJust.empty());
             LogN("Delayed: " << eq.to_string() << " := 1");
-            if (!term_solver.asserted_eq(eq.just.litJust[0], eq.LHS, eq.RHS, true))
+            if (!term_solver.asserted_eq(eq.just, eq.LHS, eq.RHS, true))
                 return false;
         }
         catch (...) {
@@ -517,7 +522,7 @@ bool matrix_propagator::delayed_rp(clause_instance* info) {
         try {
             assert(eq.just.litJust.size() == 1 && eq.just.eqJust.empty());
             LogN("Delayed: " << eq.to_string() << " := 0");
-            if (!term_solver.asserted_eq(eq.just.litJust[0], eq.LHS, eq.RHS, false))
+            if (!term_solver.asserted_eq(eq.just, eq.LHS, eq.RHS, false))
                 return false;
         }
         catch (...) {
@@ -700,10 +705,9 @@ void matrix_propagator::final() {
     }
 
     for (const auto& paths : submatrix_paths) {
-        vector<literal> justifications;
-        justifications.reserve(paths.size());
+        justification just(paths.size());
         for (int i = 0; i < paths[0].size(); i++) {
-            justifications.push_back(paths[0][i].clause.selector);
+            just.add_literal(paths[0][i].clause.selector);
         }
 
         for (const auto& path : paths) {
@@ -762,10 +766,10 @@ void matrix_propagator::final() {
                 }
             }
             if (constraints.empty()) {
-                propagate_conflict(justifications);
+                propagate_conflict(just);
                 return;
             }
-            hard_propagate(justifications, m.mk_or(constraints));
+            hard_propagate(just, m.mk_or(constraints));
         }
     }
 }
@@ -807,7 +811,7 @@ void matrix_propagator::find_path(int clauseIdx, const vector<clause_instance*>&
         if (failed)
             continue;
 
-        path.emplace_back(*info, info->copyIdx, l1);
+        path.emplace_back(*info, l1);
         steps++;
         find_path(clauseIdx + 1, clauses, path, foundPaths, steps);
         if (foundPaths.size() >= MAX_FINAL_PATHS)
@@ -855,7 +859,7 @@ void matrix_propagator::find_path_sat(const vector<clause_instance*>& clauses, v
             for (; j < clauses[i]->literals.size(); j++) {
                 int val = subsolver.val(abs(sat_clauses[i][j]));
                 if (val == sat_clauses[i][j]) {
-                    foundPaths.back().emplace_back(*clauses[i], clauses[i]->copyIdx, clauses[i]->literals[j]);
+                    foundPaths.back().emplace_back(*clauses[i], clauses[i]->literals[j]);
                     newClause.push_back(-sat_clauses[i][j]);
                     break;
                 }

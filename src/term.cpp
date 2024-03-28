@@ -19,8 +19,7 @@ size_t std::hash<term_instance>::operator()(const term_instance& x) const {
     return hash(*x.t) * 133 + x.cpy_idx();
 }
 
-void justification::resolve_justification(simple_adt_solver* adtSolver, vector<literal>& just,
-                                          unordered_map<term_instance*, unsigned>& termInstance, vector<unsigned>& parent) const {
+void justification::resolve_justification(propagator_base& propagator, vector<literal>& just) const {
 
     add_range(just, litJust);
 
@@ -28,7 +27,7 @@ void justification::resolve_justification(simple_adt_solver* adtSolver, vector<l
         if (from == to)
             continue;
 
-        assert(from->find_root(adtSolver->propagator()) == to->find_root(adtSolver->propagator()));
+        assert(from->find_root(propagator) == to->find_root(propagator));
 
         stack<tuple<term_instance*, term_instance*, justification*>> todo;
         vector<justification*> eqJustifications;
@@ -36,7 +35,7 @@ void justification::resolve_justification(simple_adt_solver* adtSolver, vector<l
         for (auto& c : from->actual_connections) {
             auto* local_to = c.GetOther(from);
             if (to == local_to) {
-                c.just.resolve_justification(adtSolver, just);
+                c.just.resolve_justification(propagator, just);
                 goto next;
             }
             todo.emplace(from, local_to, &c.just);
@@ -61,7 +60,7 @@ void justification::resolve_justification(simple_adt_solver* adtSolver, vector<l
                 if (local_to == to) {
                     eqJustifications.push_back(&c.just);
                     for (auto* j : eqJustifications) {
-                        j->resolve_justification(adtSolver, just);
+                        j->resolve_justification(propagator, just);
                     }
                     goto next;
                 }
@@ -73,12 +72,6 @@ void justification::resolve_justification(simple_adt_solver* adtSolver, vector<l
 
         next:;
     }
-}
-
-void justification::resolve_justification(simple_adt_solver* adtSolver, vector<literal>& just) const {
-    unordered_map<term_instance*, unsigned> termInstance;
-    vector<unsigned> parent;
-    resolve_justification(adtSolver, just, termInstance, parent);
 }
 
 string justification::to_string() const {
@@ -120,7 +113,7 @@ equality::equality(term_instance* lhs, term_instance* rhs, justification just) :
     }
 }
 
-disequality::disequality(term_instance* lhs, term_instance* rhs, literal just) : just(just) {
+disequality::disequality(term_instance* lhs, term_instance* rhs, justification just) : just(just) {
     if (lhs->compare_to(rhs) <= 0) {
         LHS = lhs;
         RHS = rhs;
@@ -170,19 +163,28 @@ term_instance* term_instance::find_root(propagator_base& propagator) {
     return current;
 }
 
-z3::expr term_instance::to_z3(matrix_propagator& propagator, z3::context& context, unordered_map<term_instance*, optional<z3::expr>>& map, vector<term_instance*>& terms) {
+z3::expr term_instance::to_z3_us() {
+    if (z3_expr.has_value())
+        return *z3_expr;
+
+    z3_expr = fresh_user_constant(t->solver.get_z3_us_sort().ctx(), "term", t->solver.get_z3_us_sort());
+    t->solver.get_complex_solver().set_z3_expr(*z3_expr, this);
+    return *z3_expr;
+}
+
+z3::expr term_instance::to_z3_adt(matrix_propagator& propagator, z3::context& context, unordered_map<term_instance*, optional<z3::expr>>& map, vector<term_instance*>& terms) {
     optional<z3::expr> e;
     if (tryGetValue(map, this, e))
         return *e;
 
     z3::expr_vector args(context);
     for (const term* arg: t->Args) {
-        args.push_back(arg->get_instance(cpy_idx(), propagator)->to_z3(propagator, context, map, terms));
+        args.push_back(arg->get_instance(cpy_idx(), propagator)->to_z3_adt(propagator, context, map, terms));
     }
     if (t->FuncID < 0)
-        e = FreshConstant(context, "var", t->Solver.get_z3_sort());
+        e = fresh_constant(context, "var", t->solver.get_z3_adt_sort());
     else
-        e = t->Solver.get_z3_sort().constructors()[t->FuncID](args);
+        e = t->solver.get_z3_adt_sort().constructors()[t->FuncID](args);
     map.insert(make_pair(this, e));
     terms.push_back(this);
     assert(map.size() == terms.size());
@@ -198,18 +200,18 @@ const term* term_instance::fully_expand(matrix_propagator& propagator) {
         for (unsigned i = 0; i < t->Args.size(); i++) {
             args.push_back(get_arg(i, propagator)->fully_expand(propagator));
         }
-        return t->Solver.make_term(t->FuncID, std::move(args), nullptr);
+        return t->solver.make_term(t->FuncID, std::move(args), nullptr);
     }
     term_instance* inst = find_root(propagator);
     if (inst->t->is_const())
         return inst->fully_expand(propagator);
-    return inst->t->Solver.get_unique_skolem();
+    return inst->t->solver.get_unique_skolem();
 }
 
-unsigned term::solver_id() const { return Solver.id(); }
+unsigned term::solver_id() const { return solver.id(); }
 
 term::term(int funcId, vector<const term*> args, simple_adt_solver& solver, unsigned hashId, const indexed_clause* clause) :
-        raw_term(funcId, std::move(args)), ast_id(hashId), origin_clause(clause), Solver(solver)
+        raw_term(funcId, std::move(args)), ast_id(hashId), origin_clause(clause), solver(solver)
 #ifndef NDEBUG
         , name(to_string())
 #endif
@@ -263,10 +265,10 @@ bool term::seems_possibly_unifiable(const term* rhs, subterm_hint& hint) const {
 }
 
 string term::to_string() const {
-    return Solver.pretty_print(this, 0, nullptr);
+    return solver.pretty_print(this, 0, nullptr);
 }
 
 string term::pretty_print(unsigned cpyIdx, unordered_map<term_instance*, string>* prettyNames) const {
-    return Solver.pretty_print(this, cpyIdx, prettyNames);
+    return solver.pretty_print(this, cpyIdx, prettyNames);
 }
 

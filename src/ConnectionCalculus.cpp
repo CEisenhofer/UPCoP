@@ -187,9 +187,9 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
     }
     if (assertions.empty())
         return sat;
-    complex_adt_solver adtSolver;
+    complex_adt_solver* adtSolver = new complex_adt_solver();
     unsigned literalCnt = 0;
-    cnf<indexed_clause*> cnf = to_cnf(mk_and(assertions), adtSolver, literalCnt);
+    cnf<indexed_clause*> cnf = to_cnf(mk_and(assertions), *adtSolver, literalCnt);
 
     vector<indexed_clause*> posClauses;
     vector<indexed_clause*> negClauses;
@@ -276,10 +276,10 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
     }
 
     if (progParams.checkProof)
-        adtSolver.make_z3_adt(context);
+        adtSolver->make_z3_adt(context);
 
     int64_t timeLeft = progParams.timeout == 0 ? INT_MAX : progParams.timeout;
-    auto* propagator = new matrix_propagator(cnf, adtSolver, progParams, literalCnt, (unsigned)timeLeft);
+    auto* propagator = new matrix_propagator(cnf, *adtSolver, progParams, literalCnt, (unsigned)timeLeft);
 
     for (unsigned id = progParams.depth; id < progParams.maxDepth; id++) {
         start_watch(level_time);
@@ -305,6 +305,11 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         out << dimacs;
         out.close();
         std::cout << "Wrote dimacs output to output.dimacs" << std::endl;
+#endif
+#ifndef NDEBUG
+        if (res == undef && propagator->is_smt()) {
+            LogN("Reason unknow: " << propagator->get_z3_propagator()->get_solver().reason_unknown());
+        }
 #endif
 
         if (res != sat) {
@@ -337,9 +342,8 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
                 delete propagator;
                 return sat;
             }
-            new int[1000];
             delete propagator;
-            propagator = new matrix_propagator(cnf, adtSolver, progParams, literalCnt, timeLeft);
+            propagator = new matrix_propagator(cnf, *adtSolver, progParams, literalCnt, timeLeft);
             continue;
         }
 
@@ -351,6 +355,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         if (silent) {
             deleteCNF(cnf);
             delete propagator;
+            delete adtSolver;
             return unsat;
         }
 
@@ -399,10 +404,12 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         propagator->check_proof(context);
         deleteCNF(cnf);
         delete propagator;
+        delete adtSolver;
         return unsat;
     }
     deleteCNF(cnf);
     delete propagator;
+    delete adtSolver;
     return undef;
 }
 
@@ -536,7 +543,7 @@ to_cnf(z3::context& ctx, const z3::expr& input, bool polarity, z3::expr_vector& 
             const auto& sorts = scopeSorts;
 
             for (unsigned i = 0; i < boundCnt; i++) {
-                z3::func_decl skolem = FreshFunction(
+                z3::func_decl skolem = fresh_function(
                         ctx,
                         "sk_" + z3::symbol(ctx, Z3_get_quantifier_bound_name(ctx, input, i)).str(),
                         sorts,
@@ -554,7 +561,7 @@ to_cnf(z3::context& ctx, const z3::expr& input, bool polarity, z3::expr_vector& 
 
         for (unsigned i = 0; i < boundCnt; i++) {
             z3::sort s(ctx, Z3_get_quantifier_bound_sort(ctx, input, i));
-            z3::expr e = FreshConstant(
+            z3::expr e = fresh_constant(
                     ctx,
                     z3::symbol(ctx, Z3_get_quantifier_bound_name(ctx, input, i)).str(),
                     s
@@ -589,7 +596,7 @@ to_cnf(z3::context& ctx, const z3::expr& input, bool polarity, z3::expr_vector& 
                 CollectTerm(arg, terms, visited);
             }
             z3::expr cpy = input;
-            z3::expr atom = cpy.substitute(Reverse(substitutions));
+            z3::expr atom = cpy.substitute(reverse(substitutions));
             if (!polarity)
                 atom = !atom;
             z3::expr_vector v(ctx);

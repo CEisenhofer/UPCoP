@@ -13,12 +13,13 @@ class complex_adt_solver {
     unordered_map<equality, formula> eqToExpr;
     unordered_map<less_than, formula> lessToExpr;
 
-    matrix_propagator* prop = nullptr;
+    unordered_map<z3::expr, term_instance*> exprToTerm;
 
-public:
+    matrix_propagator* prop = nullptr;
 
     vector<simple_adt_solver*> solvers;
 
+public:
 
     inline unsigned get_sort_cnt() const {
         return SortNames.size();
@@ -31,7 +32,11 @@ public:
 
     ~complex_adt_solver();
 
-    void reset(matrix_propagator* propagator);
+    inline void set(matrix_propagator* propagator) {
+        prop = propagator;
+    }
+
+    void clear();
 
     inline matrix_propagator& propagator() const {
         return *prop;
@@ -47,8 +52,10 @@ public:
 
     bool asserted(literal e, bool isTrue);
 
-    bool asserted_eq(literal e, term_instance* lhs, term_instance* rhs, bool isTrue) const;
+    bool asserted_eq(justification just, term_instance* lhs, term_instance* rhs, bool isTrue) const;
     bool asserted_less(literal e, term_instance* lhs, term_instance* rhs) const;
+
+    bool try_assert_eq(equality info, bool isTrue);
 
     bool contains_cycle(term_instance* t, term_instance* c) const;
     bool preprocess_equality(term_instance* lhs, term_instance* rhs, vector<equality>& subproblems);
@@ -84,7 +91,16 @@ public:
 
     static bool are_equal(term_instance* lhs, term_instance* rhs);
 
+    void make_z3_us(z3::context& ctx);
     void make_z3_adt(z3::context& ctx);
+
+    void set_z3_expr(const z3::expr& e, term_instance* term) {
+        exprToTerm.insert(make_pair(e, term));
+    }
+
+    term_instance* get_term(const z3::expr& e) const {
+        return exprToTerm.at(e);
+    }
 };
 
 class simple_adt_solver {
@@ -93,7 +109,8 @@ class simple_adt_solver {
 
     complex_adt_solver& complexSolver;
 
-    optional<z3::sort> z3Sort;
+    optional<z3::sort> z3ADTSort;
+    optional<z3::sort> z3USSort;
     const unsigned solverId;
     vector<std::vector<unsigned>> domains;
     vector<string> funcNames;
@@ -108,7 +125,6 @@ class simple_adt_solver {
 
     void conflict(const justification& just);
     void propagate(const justification& just, formula prop);
-    bool soft_propagate(const justification& just, literal prop);
 
     void ensure_founded();
 
@@ -142,6 +158,10 @@ public:
 
     inline matrix_propagator& propagator() const {
         return complexSolver.propagator();
+    }
+
+    inline complex_adt_solver& get_complex_solver() const {
+        return complexSolver;
     }
 
 #ifndef NDEBUG
@@ -182,8 +202,13 @@ public:
         return solverId;
     }
 
-    inline z3::sort get_z3_sort() const {
-        return *z3Sort;
+    inline z3::sort get_z3_us_sort() const {
+        assert(z3USSort.has_value());
+        return *z3USSort;
+    }
+
+    inline z3::sort get_z3_adt_sort() const {
+        return *z3ADTSort;
     }
 
     string pretty_print(const term* t, unsigned cpyIdx, unordered_map<term_instance*, string>* prettyNames) const;
@@ -210,11 +235,11 @@ private:
 
 public:
 
-    bool non_unify_split(literal just, term_instance* lhs, term_instance* rhs);
-    tri_state test_non_unify_split(literal lit, term_instance* lhs, term_instance* rhs);
+    bool non_unify_split(term_instance* lhs, term_instance* rhs, const justification& just);
+    tri_state test_non_unify_split(term_instance* lhs, term_instance* rhs, justification just);
     bool unify(literal just, term_instance* lhs, term_instance* rhs);
     bool are_equal(term_instance* lhs, term_instance* rhs);
-    bool non_unify(literal just, term_instance* lhs, term_instance* rhs);
+    bool non_unify(term_instance* lhs, term_instance* rhs, const justification& just);
     bool less(literal just, term_instance* lhs, term_instance* rhs);
     tri_state test_less(literal just, term_instance* lhs, term_instance* rhs);
 
@@ -237,7 +262,6 @@ private:
     bool merge_root(term_instance* r1, term_instance* r2, const equality& eq);
 
 public:
-    static void find_just(term_instance* n1, term_instance* n2, justification& minimalJust);
 
     string to_string() const;
 };

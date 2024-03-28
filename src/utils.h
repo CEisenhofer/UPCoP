@@ -228,20 +228,19 @@ inline void add_range(vector<T>& v, const vector<T>& other) {
     v.insert(v.end(), other.begin(), other.end());
 }
 
-inline z3::expr FreshUserConstant(z3::context& ctx, const string& prefix, const z3::sort& sort) {
-    Z3_func_decl decl = Z3_mk_fresh_func_decl(ctx, prefix.c_str(), 0, nullptr, sort);
-    z3::func_decl fresh = z3::func_decl(ctx, decl);
-    z3::expr e = ctx.user_propagate_function(fresh.name(), z3::sort_vector(ctx), sort)();
-    return e;
-}
-
-inline z3::expr FreshConstant(z3::context& ctx, const string& prefix, const z3::sort& sort) {
+inline z3::expr fresh_constant(z3::context& ctx, const string& prefix, const z3::sort& sort) {
     Z3_ast e = Z3_mk_fresh_const(ctx, prefix.c_str(), sort);
-    //Z3_ast e = Z3_mk_fresh_const(ctx, prefix.c_str(), sort);
     return { ctx, e };
 }
 
-inline z3::func_decl FreshFunction(z3::context& ctx, const string& prefix, const z3::sort_vector& domain, const z3::sort& sort) {
+inline z3::expr fresh_user_constant(z3::context& ctx, const string& prefix, const z3::sort& sort) {
+    z3::array<Z3_sort> args(0);
+    z3::func_decl decl = { ctx, Z3_mk_fresh_func_decl(ctx, prefix.c_str(), 0, args.ptr(), sort) };
+    z3::func_decl f = { ctx, Z3_solver_propagate_declare(ctx, decl.name(), 0, args.ptr(), sort) };
+    return f();
+}
+
+inline z3::func_decl fresh_function(z3::context& ctx, const string& prefix, const z3::sort_vector& domain, const z3::sort& sort) {
     z3::array<Z3_sort> args(domain.size());
     for (unsigned i = 0; i < args.size(); i++) {
         args[(int)i] = domain[i];
@@ -250,7 +249,7 @@ inline z3::func_decl FreshFunction(z3::context& ctx, const string& prefix, const
     return { ctx, decl };
 }
 
-inline z3::expr_vector Reverse(const z3::expr_vector& v) {
+inline z3::expr_vector reverse(const z3::expr_vector& v) {
     z3::expr_vector ret(v.ctx());
     ret.resize(v.size());
     for (unsigned i = 0; i < v.size(); i++) {

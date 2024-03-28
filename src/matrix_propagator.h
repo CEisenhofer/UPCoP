@@ -80,10 +80,9 @@ struct clause_instance {
 
 struct path_element {
     const clause_instance& clause;
-    int cpy;
     const ground_literal lit;
 
-    path_element(const clause_instance& clause, int cpy, const ground_literal& lit) : clause(clause), cpy(cpy), lit(lit) {}
+    path_element(const clause_instance& clause, const ground_literal& lit) : clause(clause), lit(lit) {}
 };
 
 class matrix_propagator : public propagator_base {
@@ -160,8 +159,9 @@ public:
 
     bool propagate_rules(literal e, clause_instance* info) {
         start_watch(connect_time);
+        justification just(e);
         for (const auto& lit : info->literals) {
-            if (!hard_propagate({ e }, connect_literal(e, info, lit))) {
+            if (!hard_propagate(just, connect_literal(e, info, lit))) {
                 stop_watch(connect_time);
                 return false;
             }

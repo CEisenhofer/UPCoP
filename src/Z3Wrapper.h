@@ -26,12 +26,25 @@ class z3_propagator : public z3::user_propagator_base {
     unordered_map<z3::expr, unsigned> z3ToIdx;
     z3::expr_vector idxToZ3;
 
+#if !defined(NDEBUG) && false
+    z3::on_clause_eh_t onClauseEh;
+    z3::on_clause onClause;
+#endif
+
 public:
 
     formula_manager m;
 
     inline z3::context& get_ctx() {
         return *ctx;
+    }
+
+    inline z3::solver& get_solver() {
+        return *s;
+    }
+
+    inline propagator_base* get_base() {
+        return base;
     }
 
     inline z3::expr get_expr(int lit) const {
@@ -62,15 +75,14 @@ public:
     }
 
 #ifndef NDEBUG
-    void output_literals(const std::vector<literal>& lit) const;
+    void output_literals(const justification& just) const;
+    void output_literals(const z3::expr_vector& lit, const z3::expr_vector& lhs, const z3::expr_vector& rhs);
 #endif
 
-    void propagate_conflict(const std::vector<literal>& just);
-
-    bool propagate(const std::vector<literal>& just, literal prop);
+    void propagate_conflict(const justification& just);
+    bool propagate(const justification& just, literal prop);
 
     z3_propagator(z3::context* ctx, z3::solver* s, propagator_base* base, unsigned timeLeft);
-    ~z3_propagator() override;
 
     bool get_value(literal v, bool& value) const {
         tri_state val = interpretation[abs(v->get_lit()) - 1];
@@ -133,7 +145,15 @@ public:
 
     inline int new_observed_var(const std::string& name) {
         signed newId = new_var_raw();
-        z3::expr e = ctx->user_propagate_function(ctx->int_symbol(newId), empty_sort_vector, ctx->bool_sort())();
+        z3::expr e = fresh_user_constant(*ctx, name, ctx->bool_sort());
+        names.insert(std::make_pair(newId, name));
+        z3ToIdx.insert(std::make_pair(e, newId));
+        idxToZ3.push_back(e);
+        return newId;
+    }
+
+    inline int register_observed_var(const z3::expr& e, const std::string& name) {
+        signed newId = new_var_raw();
         names.insert(std::make_pair(newId, name));
         z3ToIdx.insert(std::make_pair(e, newId));
         idxToZ3.push_back(e);
@@ -144,7 +164,16 @@ public:
 
     inline int new_observed_var() {
         signed newId = new_var_raw();
-        z3::expr e = ctx->user_propagate_function(ctx->int_symbol(newId), empty_sort_vector, ctx->bool_sort())();
+        z3::expr e = fresh_user_constant(*ctx, "v", ctx->bool_sort());
+        z3ToIdx.insert(std::make_pair(e, newId));
+        idxToZ3.push_back(e);
+        return newId;
+    }
+
+#define register_observed_var(X, Y) register_observed_var2(X)
+
+    inline int register_observed_var2(const z3::expr& e) {
+        signed newId = new_var_raw();
         z3ToIdx.insert(std::make_pair(e, newId));
         idxToZ3.push_back(e);
         return newId;
@@ -155,6 +184,10 @@ public:
 protected:
 
     void fixed(const z3::expr& e, const z3::expr& v) final;
+
+    void eq(const z3::expr& lhs, const z3::expr& rhs) final;
+
+    void diseq(const z3::expr& lhs, const z3::expr& rhs) final;
 
     void push() final;
 

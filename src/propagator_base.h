@@ -4,6 +4,7 @@
 #include "CLIParser.h"
 #include "cnf.h"
 #include "ground_literal.h"
+#include "CadicalWrapper.h"
 #include "Z3Wrapper.h"
 #include <random>
 
@@ -105,6 +106,8 @@ public:
     complex_adt_solver& term_solver;
     formula_manager& m;
 
+    large_array unificationHints;
+
     propagator_base(propagator_base&) = delete;
     propagator_base& operator=(propagator_base&) = delete;
 
@@ -115,10 +118,21 @@ public:
         return progParams.satSplit;
     }
 
+    inline bool is_smt() const {
+        return progParams.smt;
+    }
+
+    CaDiCal_propagator* get_cadical_propagator() const {
+        return cadicalPropagator;
+    }
+
+    z3_propagator* get_z3_propagator() const {
+        return z3Propagator;
+    }
+
     propagator_base(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt, unsigned timeLeft);
     virtual ~propagator_base();
 
-    large_array unificationHints;
 
     inline void add_undo(const action& action) {
         undo_stack.push_back(action);
@@ -145,6 +159,7 @@ public:
 #ifndef NDEBUG
 
     inline int new_observed_var(const std::string& name) {
+        // phase -- TODO!!!
         if (cadicalPropagator != nullptr)
             return cadicalPropagator->new_observed_var(name);
         return z3Propagator->new_observed_var(name);
@@ -213,20 +228,20 @@ public:
         return cadicalPropagator != nullptr ? cadicalPropagator->check() : z3Propagator->check();
     }
 
-    inline void propagate_conflict(const std::vector<literal>& just) const {
+    inline void propagate_conflict(const justification& just) const {
         if (cadicalPropagator != nullptr)
             cadicalPropagator->propagate_conflict(just);
         else
             z3Propagator->propagate_conflict(just);
     }
 
-    inline bool hard_propagate(const std::vector<literal>& just, formula prop) const {
+    inline bool hard_propagate(const justification& just, formula prop) const {
         if (cadicalPropagator != nullptr)
             return cadicalPropagator->hard_propagate(just, prop);
         return z3Propagator->propagate(just, (literal)prop);
     }
 
-    inline bool soft_propagate(const std::vector<literal>& just, literal prop) const {
+    inline bool soft_propagate(const justification& just, literal prop) const {
         if (cadicalPropagator != nullptr)
             return cadicalPropagator->soft_propagate(just, prop);
         return z3Propagator->propagate(just, prop);
