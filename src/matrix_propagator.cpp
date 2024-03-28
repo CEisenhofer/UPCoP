@@ -508,7 +508,9 @@ bool matrix_propagator::delayed_rp(clause_instance* info) {
     // "Relevance propagation" of delayed equalities
     for (const auto& eq : info->delayedRelevantTrue) {
         try {
-            assert(eq.just.litJust.size() == 1 && eq.just.eqJust.empty());
+            assert(
+                    (is_smt() && eq.just.litJust.empty() && eq.just.eqJust.size() == 1 && eq.just.diseqJust.first == nullptr) ||
+                    (!is_smt() && eq.just.litJust.size() == 1 && eq.just.eqJust.empty() && eq.just.diseqJust.first == nullptr));
             LogN("Delayed: " << eq.to_string() << " := 1");
             if (!term_solver.asserted_eq(eq.just, eq.LHS, eq.RHS, true))
                 return false;
@@ -520,7 +522,9 @@ bool matrix_propagator::delayed_rp(clause_instance* info) {
     }
     for (const auto& eq : info->delayedRelevantFalse) {
         try {
-            assert(eq.just.litJust.size() == 1 && eq.just.eqJust.empty());
+            assert(
+                    (is_smt() && eq.just.litJust.empty() && eq.just.eqJust.empty() && eq.just.diseqJust.first != nullptr) ||
+                    (!is_smt() && eq.just.litJust.size() == 1 && eq.just.eqJust.empty() && eq.just.diseqJust.first == nullptr));
             LogN("Delayed: " << eq.to_string() << " := 0");
             if (!term_solver.asserted_eq(eq.just, eq.LHS, eq.RHS, false))
                 return false;

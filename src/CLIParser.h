@@ -31,7 +31,7 @@ struct ProgParams {
     bool checkProof = false;
     bool smt = false;
     ConjStrategy conjectures = Keep;
-    bool satSplit = false;
+    bool satSplit = true; // TODO: For now let's fix it
     InputFormat format = TPTP;
 
     std::vector<unsigned> multiplicity;
