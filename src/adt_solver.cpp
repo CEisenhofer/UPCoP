@@ -139,8 +139,10 @@ bool complex_adt_solver::asserted_eq(justification just, term_instance* lhs, ter
     start_watch(term_time);
     if (propagator().is_adt_split()) {
         res = isTrue
-               ? lhs->t->solver.unify(lhs, rhs, just)
-               : lhs->t->solver.non_unify_split(lhs, rhs, just);
+                ? propagator().is_smt()
+                    ? lhs->t->solver.unify_split(lhs, rhs, std::move(just))
+                    : lhs->t->solver.unify(lhs, rhs, just)
+                : lhs->t->solver.non_unify_split(lhs, rhs, just);
     }
     else {
         res = isTrue
@@ -259,7 +261,7 @@ literal complex_adt_solver::make_equality_atom(term_instance* lhs, term_instance
         }
         else {
             expr = prop->m.mk_lit(prop->new_observed_var(OPT(eq.to_string())));
-            eq.just.add_literal((literal)expr);
+            eq.just.push_literal((literal)expr);
         }
         exprToEq.insert(make_pair((literal)expr, eq));
         eqToExpr.insert(make_pair(eq, expr));
@@ -297,7 +299,7 @@ formula complex_adt_solver::make_equality_expr(term_instance* lhs, term_instance
         return cases[0]; // There was absolutely no change -> the loop before created the atom already
 
     expr = prop->m.mk_and(cases);
-    eq.just.add_literals(cases2);
+    eq.just.push_literals(cases2);
     eqToExpr.insert(make_pair(eq, expr));
     return expr;
 }
@@ -617,6 +619,46 @@ string simple_adt_solver::to_string() const {
     return sb.str();
 }
 
+bool simple_adt_solver::unify_split(term_instance* lhs, term_instance* rhs, justification just) {
+
+    if (lhs->t->id() == rhs->t->id() && (lhs->cpy_idx() == rhs->cpy_idx() || lhs->t->is_ground()))
+        return true;
+    if (lhs->t->is_ground() && rhs->t->is_ground() && lhs->t->id() != rhs->t->id()) {
+        conflict(just);
+        return false;
+    }
+
+    term_instance* r1 = lhs->find_root(propagator());
+    term_instance* r2 = rhs->find_root(propagator());
+
+    if (r1 == r2)
+        return true;
+
+    if (r1->t->is_const() && r2->t->is_const()) {
+        just.push_equality(lhs, r1);
+        just.push_equality(rhs, r2);
+        if (r1->t->FuncID != r2->t->FuncID) {
+            conflict(just);
+            return false;
+        }
+        for (unsigned i = 0; i < r1->t->Args.size(); i++) {
+            formula f = complexSolver.make_equality_expr(r1->get_arg(i, propagator()), r2->get_arg(i, propagator()));
+            if (f->is_true())
+                continue;
+            propagate(just, f);
+        }
+        return true;
+    }
+
+    if (merge_root(r1, r2, { lhs, rhs, { just } })) {
+        return true;
+    }
+    just.push_equality(lhs, r1);
+    just.push_equality(rhs, r2);
+    conflict(just);
+    return false;
+}
+
 bool simple_adt_solver::non_unify_split(term_instance* lhs, term_instance* rhs, const justification& just) {
     switch (test_non_unify_split(lhs, rhs, just)) {
         case sat:
@@ -638,7 +680,7 @@ tri_state simple_adt_solver::test_non_unify_split(term_instance* lhs, term_insta
     auto* r2 = rhs->find_root(propagator());
 
     if (r1 == r2) {
-        just.add_equality(lhs, rhs);
+        just.push_equality(lhs, rhs);
         conflict(just);
         return unsat;
     }
@@ -650,8 +692,8 @@ tri_state simple_adt_solver::test_non_unify_split(term_instance* lhs, term_insta
         formula f = complexSolver.make_disequality_expr(r1, r2);
         if (f->is_true())
             return sat;
-        just.add_equality(lhs, r1);
-        just.add_equality(rhs, r2);
+        just.push_equality(lhs, r1);
+        just.push_equality(rhs, r2);
 
         if (f->is_false()) {
             conflict(just);
@@ -665,7 +707,7 @@ tri_state simple_adt_solver::test_non_unify_split(term_instance* lhs, term_insta
 
 bool simple_adt_solver::unify(literal just, term_instance* lhs, term_instance* rhs) {
     justification justList;
-    justList.add_literal(just);
+    justList.push_literal(just);
     return unify(lhs, rhs, justList);
 }
 
@@ -690,12 +732,12 @@ bool simple_adt_solver::are_equal(term_instance* lhs, term_instance* rhs) {
     return false;
 }
 
-bool simple_adt_solver::unify(term_instance* lhs, term_instance* rhs, justification& justifications) {
+bool simple_adt_solver::unify(term_instance* lhs, term_instance* rhs, justification& just) {
 
     if (lhs->t->id() == rhs->t->id() && (lhs->cpy_idx() == rhs->cpy_idx() || lhs->t->is_ground()))
         return true;
     if (lhs->t->is_ground() && rhs->t->is_ground() && lhs->t->id() != rhs->t->id()) {
-        conflict(justifications);
+        conflict(just);
         return false;
     }
 
@@ -706,27 +748,27 @@ bool simple_adt_solver::unify(term_instance* lhs, term_instance* rhs, justificat
         return true;
 
     if (r1->t->is_const() && r2->t->is_const()) {
-        justifications.add_equality(lhs, r1);
-        justifications.add_equality(rhs, r2);
+        just.push_equality(lhs, r1);
+        just.push_equality(rhs, r2);
         if (r1->t->FuncID != r2->t->FuncID) {
-            conflict(justifications);
+            conflict(just);
             return false;
         }
         for (unsigned i = 0; i < r1->t->Args.size(); i++) {
-            if (!unify(r1->get_arg(i, propagator()), r2->get_arg(i, propagator()), justifications))
+            if (!unify(r1->get_arg(i, propagator()), r2->get_arg(i, propagator()), just))
                 return false;
         }
-        justifications.remove_equality();
-        justifications.remove_equality();
+        just.pop_equality();
+        just.pop_equality();
         return true;
     }
 
-    if (merge_root(r1, r2, { lhs, rhs, { justifications } })) {
+    if (merge_root(r1, r2, { lhs, rhs, { just } })) {
         return true;
     }
-    justifications.add_equality(lhs, r1);
-    justifications.add_equality(rhs, r2);
-    conflict(justifications);
+    just.push_equality(lhs, r1);
+    just.push_equality(rhs, r2);
+    conflict(just);
     return false;
 }
 
@@ -770,7 +812,7 @@ z3::check_result simple_adt_solver::non_unify(Lazy* lazy) {
         term_instance* r1 = lazy->LHS->find_root(propagator());
         term_instance* r2 = lazy->RHS->find_root(propagator());
         if (r1 == r2) {
-            lazy->just.add_equality(lazy->LHS, lazy->RHS);
+            lazy->just.push_equality(lazy->LHS, lazy->RHS);
             lazy->LHS = nullptr;
             lazy->RHS = nullptr;
             continue;
@@ -791,8 +833,8 @@ z3::check_result simple_adt_solver::non_unify(Lazy* lazy) {
 
         assert(r1->t->Args.size() == r2->t->Args.size());
 
-        lazy->just.add_equality(lazy->LHS, r1);
-        lazy->just.add_equality(lazy->RHS, r2);
+        lazy->just.push_equality(lazy->LHS, r1);
+        lazy->just.push_equality(lazy->RHS, r2);
 
         if (r1->t->Args.size() == 1) {
             lazy->LHS = r1->get_arg(0, propagator());
@@ -811,16 +853,16 @@ z3::check_result simple_adt_solver::non_unify(Lazy* lazy) {
     return z3::check_result::unsat;
 }
 
-bool simple_adt_solver::check_containment_cycle(term_instance* inst) {
+bool simple_adt_solver::check_containment_cycle(term_instance* inst, justification& just) {
     if (!inst->t->is_const() || inst->t->is_ground())
         return true;
     auto* r = inst->find_root(propagator());
-    justification justifications;
-    justifications.add_equality(inst, r);
-    for (auto* arg : inst->t->Args) {
-        if (!check_containment_cycle(arg->get_instance(inst->cpy_idx(), propagator()), r, justifications))
+    just.push_equality(inst, r);
+    for (const auto* arg : inst->t->Args) {
+        if (!check_containment_cycle(arg->get_instance(inst->cpy_idx(), propagator()), r, just))
             return false;
     }
+    just.pop_equality();
     return true;
 }
 
@@ -830,7 +872,7 @@ bool simple_adt_solver::check_containment_cycle(term_instance* inst, term_instan
 
     if (r == search) {
         // Found the cycle
-        justifications.add_equality(inst, r);
+        justifications.push_equality(inst, r);
         conflict(justifications);
         return false;
     }
@@ -838,12 +880,12 @@ bool simple_adt_solver::check_containment_cycle(term_instance* inst, term_instan
     if (r->t->is_var())
         return true;
 
-    justifications.add_equality(inst, r);
+    justifications.push_equality(inst, r);
     for (auto* arg : r->t->Args) {
         if (!check_containment_cycle(arg->get_instance(r->cpy_idx(), propagator()), search, justifications))
             return false;
     }
-    justifications.remove_equality();
+    justifications.pop_equality();
     return true;
 }
 
@@ -875,7 +917,7 @@ bool simple_adt_solver::non_unify(term_instance* lhs, term_instance* rhs, const 
 bool simple_adt_solver::less(literal just, term_instance* lhs, term_instance* rhs) {
 
     justification j;
-    j.add_literal(just);
+    j.push_literal(just);
 
     start_mark();
     if (!check_smaller_cycle(rhs, rhs->find_root(propagator()), lhs, j)) {
@@ -922,8 +964,8 @@ tri_state simple_adt_solver::test_less(literal just, term_instance* lhs, term_in
 
     if (r1 == r2) {
         justification j;
-        j.add_literal(just);
-        j.add_equality(lhs, rhs);
+        j.push_literal(just);
+        j.push_equality(lhs, rhs);
         conflict(j);
         return unsat;
     }
@@ -934,9 +976,9 @@ tri_state simple_adt_solver::test_less(literal just, term_instance* lhs, term_in
                 return sat;
             assert(r1->t->FuncID > r2->t->FuncID);
             justification justList;
-            justList.add_literal(just);
-            justList.add_equality(lhs, r1);
-            justList.add_equality(rhs, r2);
+            justList.push_literal(just);
+            justList.push_equality(lhs, r1);
+            justList.push_equality(rhs, r2);
             conflict(justList);
             return unsat;
         }
@@ -947,9 +989,9 @@ tri_state simple_adt_solver::test_less(literal just, term_instance* lhs, term_in
         if (f->is_true())
             return sat;
         justification justList;
-        justList.add_literal(just);
-        justList.add_equality(lhs, r1);
-        justList.add_equality(rhs, r2);
+        justList.push_literal(just);
+        justList.push_equality(lhs, r1);
+        justList.push_equality(rhs, r2);
 
         if (f->is_false()) {
             conflict(justList);
@@ -990,7 +1032,7 @@ bool simple_adt_solver::check_smaller_cycle(term_instance* start, term_instance*
     auto* currentRoot = current->find_root((propagator_base&)propagator());
 
     if (startRoot == currentRoot) {
-        just.add_equality(start, current);
+        just.push_equality(start, current);
         return false;
     }
 
@@ -998,8 +1040,8 @@ bool simple_adt_solver::check_smaller_cycle(term_instance* start, term_instance*
     if (startRoot->t->is_const() && currentRoot->t->is_const() &&
         startRoot->t->FuncID != currentRoot->t->FuncID &&
         startRoot->t->FuncID < currentRoot->t->FuncID) {
-        just.add_equality(start, startRoot);
-        just.add_equality(current, currentRoot);
+        just.push_equality(start, startRoot);
+        just.push_equality(current, currentRoot);
         return false;
     }
 
@@ -1012,8 +1054,8 @@ bool simple_adt_solver::check_smaller_cycle(term_instance* start, term_instance*
         for (auto i = 0; i < cnt; i++) {
             auto& [inst, justifications] = children[i];
 
-            just.add_equality(current, current2);
-            just.add_literal(justifications);
+            just.push_equality(current, current2);
+            just.push_literal(justifications);
             if (!check_smaller_cycle(start, startRoot, inst, just))
                 return false;
             just.litJust.pop_back();
@@ -1116,14 +1158,15 @@ bool simple_adt_solver::add_root(term_instance* b, term_instance* newRoot, const
     b->parent = newRoot;
     newRoot->cnt += b->cnt;
 
+
     if (!succ) {
         // now it is safe to report the conflict
-        just.add_equality(eq.LHS, eq.RHS);
+        just.add(eq.just);
         conflict(just);
         return false;
     }
 
-    if (!check_containment_cycle(newRoot))
+    if (!check_containment_cycle(newRoot, just))
         return false;
 
     if (complexSolver.propagator().is_adt_split()) {

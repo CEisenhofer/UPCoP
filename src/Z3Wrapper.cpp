@@ -156,6 +156,8 @@ z3_propagator::z3_propagator(z3::context* ctx, z3::solver* s, propagator_base* b
 #endif
         {
 
+    s->set("random_seed", 1u);
+
     register_fixed();
     register_final();
     register_eq();

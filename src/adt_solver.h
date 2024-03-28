@@ -235,6 +235,7 @@ private:
 
 public:
 
+    bool unify_split(term_instance* lhs, term_instance* rhs, justification just);
     bool non_unify_split(term_instance* lhs, term_instance* rhs, const justification& just);
     tri_state test_non_unify_split(term_instance* lhs, term_instance* rhs, justification just);
     bool unify(literal just, term_instance* lhs, term_instance* rhs);
@@ -246,11 +247,10 @@ public:
 
 private:
 
-    bool unify(term_instance* lhs, term_instance* rhs, justification& justifications);
+    bool unify(term_instance* lhs, term_instance* rhs, justification& just);
     z3::check_result non_unify(Lazy* lazy);
 
-
-    bool check_containment_cycle(term_instance* inst);
+    bool check_containment_cycle(term_instance* inst, justification& just);
     bool check_containment_cycle(term_instance* inst, term_instance* search, justification& justifications);
 
     bool is_reachable(term_instance* from, term_instance* to);

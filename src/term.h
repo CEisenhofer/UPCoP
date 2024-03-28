@@ -150,30 +150,32 @@ struct justification {
 
     justification(literal lit) : litJust { lit } { }
 
-    void add_literal(literal lit) {
+    void push_literal(literal lit) {
         litJust.push_back(lit);
     }
 
-    void add_literals(const std::vector<literal>& lit) {
+    void push_literals(const std::vector<literal>& lit) {
         add_range(litJust, lit);
     }
 
-    void remove_literal() {
+    void pop_literal() {
         litJust.pop_back();
     }
 
-    void add_equality(term_instance* lhs, term_instance* rhs) {
+    void push_equality(term_instance* lhs, term_instance* rhs) {
         // this is not an equivalence class; order does not matter
         eqJust.emplace_back(lhs, rhs);
     }
 
-    void remove_equality() {
+    void pop_equality() {
         eqJust.pop_back();
     }
 
     void add(const justification& other) {
         add_range(litJust, other.litJust);
         add_range(eqJust, other.eqJust);
+        assert(other.diseqJust.first == nullptr);
+        assert(diseqJust.first == nullptr);
     }
 
     void clear() {

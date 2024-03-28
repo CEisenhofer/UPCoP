@@ -298,7 +298,7 @@ void matrix_propagator::pb_clause_limit() {
 
         for (auto* clause : allClauses) {
             if (clause->value == sat)
-                just.add_literal(clause->selector);
+                just.push_literal(clause->selector);
             else if (clause->value == undef)
                 prop.push_back(m.mk_not(clause->selector));
         }
@@ -318,7 +318,7 @@ void matrix_propagator::pb_clause_limit() {
 
         for (auto* clause : allClauses) {
             if (clause->value == unsat)
-                just.add_literal(m.mk_not(clause->selector));
+                just.push_literal(m.mk_not(clause->selector));
             else if (clause->value == undef)
                 prop.push_back(clause->selector);
         }
@@ -711,7 +711,7 @@ void matrix_propagator::final() {
     for (const auto& paths : submatrix_paths) {
         justification just(paths.size());
         for (int i = 0; i < paths[0].size(); i++) {
-            just.add_literal(paths[0][i].clause.selector);
+            just.push_literal(paths[0][i].clause.selector);
         }
 
         for (const auto& path : paths) {

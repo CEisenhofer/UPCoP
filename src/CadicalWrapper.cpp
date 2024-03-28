@@ -163,7 +163,7 @@ bool CaDiCal_propagator::soft_propagate(const justification& just, literal prop)
             // Already assigned
             return true;
         justification just2 = just;
-        just2.add_literal(m.mk_not(prop));
+        just2.push_literal(m.mk_not(prop));
         propagate_conflict(just2);
         return false;
     }
@@ -320,7 +320,7 @@ bool CaDiCal_propagator::cb_check_found_model(const std::vector<int>& model) {
             std::cout << "Conflict found - translate it to a hard propagation" << std::endl;
             justification just(pending_soft_propagations[i].first.size());
             for (unsigned j = 0; j < pending_soft_propagations[i].first.size() - 1; j++) {
-                just.add_literal(m.mk_lit(pending_soft_propagations[i].first[j]));
+                just.push_literal(m.mk_lit(pending_soft_propagations[i].first[j]));
             }
             hard_propagate(just, m.mk_lit(pending_soft_propagations[i].first.back()));
             return false;
