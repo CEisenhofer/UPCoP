@@ -26,64 +26,6 @@ namespace std {
     };
 }
 
-class large_array final {
-    // This is fine, as the class is longer than one; the index is invalid for sure
-#define FAILED_PTR ((subterm_hint*)-1)
-    unsigned size;
-    optional<vector<const subterm_hint*>> small;
-    optional<unordered_map<pair<unsigned, unsigned>, const subterm_hint*>> large;
-
-public:
-
-    large_array(unsigned size);
-    ~large_array();
-
-    const subterm_hint* get(unsigned i, unsigned j) const;
-    void set(unsigned i, unsigned j, const subterm_hint* hint);
-    void set_invalid(unsigned i, unsigned j) {
-        return set(i, j, FAILED_PTR);
-    }
-    static bool is_invalid(const subterm_hint* hint) {
-        assert(hint != nullptr);
-        return hint == FAILED_PTR;
-    }
-};
-
-class subterm_hint final {
-
-    const bool swapped = false;
-    vector<pair<const term*, const term*>> equalities;
-
-public:
-
-    subterm_hint() = default;
-
-    subterm_hint(vector<pair<const term*, const term*>> equalities, bool swapped) : swapped(swapped), equalities(std::move(equalities)) { }
-
-    void get_pos_constraints(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2, vector<formula>& constraints) const;
-    formula get_neg_constraints(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2) const;
-
-    bool is_satisfied(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2) const;
-
-    inline pair<int, int> get_cpy_idx(const ground_literal& l1, const ground_literal& l2) const {
-        // return (l1.CopyIndex, l2.CopyIndex);
-        return !swapped ? make_pair(l1.copyIdx, l2.copyIdx) : make_pair(l2.copyIdx, l1.copyIdx);
-    }
-
-    bool tautology() const {
-        return equalities.empty();
-    }
-
-    subterm_hint* swap() const {
-        return new subterm_hint(equalities, !swapped);
-    }
-
-    void add(const term* t1, const term* t2) {
-        equalities.emplace_back(t1, t2);
-    }
-};
-
-// TODO: Merge with matrix propagator
 struct propagator_base {
 
     mutable std::default_random_engine generator;
@@ -105,8 +47,6 @@ public:
 
     complex_adt_solver& term_solver;
     formula_manager& m;
-
-    large_array unificationHints;
 
     propagator_base(propagator_base&) = delete;
     propagator_base& operator=(propagator_base&) = delete;
@@ -130,7 +70,7 @@ public:
         return z3Propagator;
     }
 
-    propagator_base(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt, unsigned timeLeft);
+    propagator_base(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned timeLeft);
     virtual ~propagator_base();
 
 
@@ -150,11 +90,6 @@ public:
     inline void clear_conflict() {
         is_conflict_flag = false;
     }
-
-    // Return: null - infeasible to unify
-    // Returns 0 length - always unifies
-    // Returns n length - given n elements have (and could) unify
-    static subterm_hint* collect_constrain_unifiable(const ground_literal& l1, const indexed_literal& l2) ;
 
 #ifndef NDEBUG
 
@@ -247,12 +182,6 @@ public:
         return z3Propagator->propagate(just, prop);
     }
 
-    const subterm_hint* cache_unification(const ground_literal& l1, const indexed_literal& l2);
-
-    inline const subterm_hint* cache_unification(const ground_literal& l1, const ground_literal& l2) {
-        return cache_unification(l1, *l2.lit);
-    }
-
     static string clause_to_string(const vector<ground_literal>& ground, unordered_map<term_instance*, string>* prettyNames);
 
     static string pretty_print_literal(const fo_literal* l, unsigned cpyIdx, unordered_map<term_instance*, string>* prettyNames);
@@ -270,6 +199,8 @@ public:
     }
 
 protected:
+
+    clause_instance* create_clause_instance(const indexed_clause* clause, unsigned cpyIdx, literal selector);
 
     template<typename T>
     void Shuffle(vector<T>& list) const {

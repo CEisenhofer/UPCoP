@@ -240,6 +240,22 @@ inline z3::expr fresh_user_constant(z3::context& ctx, const string& prefix, cons
     return f();
 }
 
+inline z3::func_decl fresh_user_function(z3::context& ctx, const string& prefix, const z3::sort& sort, const z3::sort& domain) {
+    z3::array<Z3_sort> args(1);
+    args[0] = domain;
+    z3::func_decl decl = { ctx, Z3_mk_fresh_func_decl(ctx, prefix.c_str(), 1, args.ptr(), sort) };
+    return { ctx, Z3_solver_propagate_declare(ctx, decl.name(), 1, args.ptr(), sort) };
+}
+
+inline z3::func_decl fresh_user_function(z3::context& ctx, const string& prefix, const z3::sort& sort, const z3::sort_vector& domain) {
+    z3::array<Z3_sort> args(domain.size());
+    for (unsigned i = 0; i < args.size(); i++) {
+        args[(int)i] = domain[i];
+    }
+    z3::func_decl decl = { ctx, Z3_mk_fresh_func_decl(ctx, prefix.c_str(), args.size(), args.ptr(), sort) };
+    return { ctx, Z3_solver_propagate_declare(ctx, decl.name(), args.size(), args.ptr(), sort) };
+}
+
 inline z3::func_decl fresh_function(z3::context& ctx, const string& prefix, const z3::sort_vector& domain, const z3::sort& sort) {
     z3::array<Z3_sort> args(domain.size());
     for (unsigned i = 0; i < args.size(); i++) {

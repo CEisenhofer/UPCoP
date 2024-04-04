@@ -4,6 +4,7 @@
 #include "cnf.h"
 #include "utils.h"
 #include "adt_solver.h"
+#include "fmb_propagator.h"
 #include "matrix_propagator.h"
 #include <fstream>
 #include <z3++.h>
@@ -191,72 +192,83 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
     unsigned literalCnt = 0;
     cnf<indexed_clause*> cnf = to_cnf(mk_and(assertions), *adtSolver, literalCnt);
 
-    vector<indexed_clause*> posClauses;
-    vector<indexed_clause*> negClauses;
-    posClauses.reserve(cnf.size());
-    negClauses.reserve(cnf.size());
+    if (!progParams.fmb) {
 
-    unsigned conjectureCnt = 0;
+        vector<indexed_clause*> posClauses;
+        vector<indexed_clause*> negClauses;
+        posClauses.reserve(cnf.size());
+        negClauses.reserve(cnf.size());
 
-    for (unsigned i = 0; i < cnf.size(); i++) {
-        auto* clause = cnf[i];
-        bool allPos = true;
-        bool allNeg = true;
-        conjectureCnt += (unsigned)clause->Conjecture;
-        for (const auto& lit : clause->literals) {
-            if (allPos && !lit->polarity)
-                allPos = false;
-            if (allNeg && lit->polarity)
-                allNeg = false;
-            if (!allPos && !allNeg)
-                break;
-        }
-        assert(!allPos || !allNeg);
-        if (allPos)
-            posClauses.push_back(clause);
-        else if (allNeg)
-            negClauses.push_back(clause);
-    }
-    if (posClauses.empty() || negClauses.empty()) {
-        if (!silent)
-            cout << "SAT because of polarity" << endl;
-        deleteCNF(cnf);
-        return sat;
-    }
+        unsigned conjectureCnt = 0;
 
-    auto smallestClauseSet = posClauses.size() < negClauses.size() ? posClauses : negClauses;
-
-    if (progParams.conjectures == Auto)
-        progParams.conjectures =
-                conjectureCnt > 1 &&
-                (unsigned)log2((double)conjectureCnt) > smallestClauseSet.size() ? Min : Keep;
-    if (conjectureCnt == 0 && progParams.conjectures == Keep)
-        progParams.conjectures = Min;
-
-    assert(progParams.conjectures != Auto);
-
-    std::vector<indexed_clause*> new_conj;
-
-    if (progParams.conjectures == Pos)
-        new_conj = std::move(posClauses);
-    else if (progParams.conjectures == Neg)
-        new_conj = std::move(negClauses);
-    else if (progParams.conjectures == Min)
-        new_conj = std::move(smallestClauseSet);
-    else {
-        assert(progParams.conjectures == Keep);
-    }
-
-    if (progParams.conjectures != Keep) {
         for (unsigned i = 0; i < cnf.size(); i++) {
-            cnf[i]->Conjecture = false;
+            auto* clause = cnf[i];
+            bool allPos = true;
+            bool allNeg = true;
+            conjectureCnt += (unsigned)clause->Conjecture;
+            for (const auto& lit : clause->literals) {
+                if (allPos && !lit->polarity)
+                    allPos = false;
+                if (allNeg && lit->polarity)
+                    allNeg = false;
+                if (!allPos && !allNeg)
+                    break;
+            }
+            assert(!allPos || !allNeg);
+            if (allPos)
+                posClauses.push_back(clause);
+            else if (allNeg)
+                negClauses.push_back(clause);
         }
-        for (auto* c : new_conj) {
-            c->Conjecture = true;
+        if (posClauses.empty() || negClauses.empty()) {
+            if (!silent)
+                cout << "SAT because of polarity" << endl;
+            deleteCNF(cnf);
+            return sat;
+        }
+
+        auto smallestClauseSet = posClauses.size() < negClauses.size() ? posClauses : negClauses;
+
+        if (progParams.conjectures == Auto)
+            progParams.conjectures =
+                    conjectureCnt > 1 &&
+                    (unsigned)log2((double)conjectureCnt) > smallestClauseSet.size() ? Min : Keep;
+        if (conjectureCnt == 0 && progParams.conjectures == Keep)
+            progParams.conjectures = Min;
+
+        assert(progParams.conjectures != Auto);
+
+        std::vector<indexed_clause*> new_conj;
+
+        if (progParams.conjectures == Pos)
+            new_conj = std::move(posClauses);
+        else if (progParams.conjectures == Neg)
+            new_conj = std::move(negClauses);
+        else if (progParams.conjectures == Min)
+            new_conj = std::move(smallestClauseSet);
+        else {
+            assert(progParams.conjectures == Keep);
+        }
+
+        if (progParams.conjectures != Keep) {
+            for (unsigned i = 0; i < cnf.size(); i++) {
+                cnf[i]->Conjecture = false;
+            }
+            for (auto* c : new_conj) {
+                c->Conjecture = true;
+            }
+        }
+
+        assert(std::any_of(cnf.clauses.begin(), cnf.clauses.end(), [](const auto* x) { return x->Conjecture; }));
+
+        if (progParams.mode == Rectangle) {
+            prep_rect(cnf, progParams);
+        }
+        else {
+            assert (progParams.mode == Core);
+            prep_core(cnf, progParams);
         }
     }
-
-    assert(std::any_of(cnf.clauses.begin(), cnf.clauses.end(), [](const auto* x) { return x->Conjecture; }));
 
     if (!silent) {
         cout << "Input file: " + path << "\n";
@@ -267,19 +279,14 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         std::flush(cout);
     }
 
-    if (progParams.mode == Rectangle) {
-        prep_rect(cnf, progParams);
-    }
-    else {
-        assert (progParams.mode == Core);
-        prep_core(cnf, progParams);
-    }
-
-    if (progParams.checkProof)
+    if (progParams.fmb || progParams.checkProof)
         adtSolver->make_z3_adt(context);
 
     int64_t timeLeft = progParams.timeout == 0 ? INT_MAX : progParams.timeout;
-    auto* propagator = new matrix_propagator(cnf, *adtSolver, progParams, literalCnt, (unsigned)timeLeft);
+    auto* propagator =
+            progParams.fmb
+            ? new fmb_propagator(cnf, *adtSolver, progParams, (unsigned)timeLeft)
+            : new matrix_propagator(cnf, *adtSolver, progParams, literalCnt, (unsigned)timeLeft);
 
     for (unsigned id = progParams.depth; id < progParams.maxDepth; id++) {
         start_watch(level_time);
@@ -686,8 +693,8 @@ void CollectTerm(const z3::expr& expr, unordered_set<optional<z3::func_decl>>& l
 }
 
 const term* substitute_term(const z3::expr& expr,
-                      const unordered_map<z3::func_decl, term_abstraction>& termAbstraction,
-                      const unordered_map<z3::func_decl, variable_abstraction>& varAbstraction) {
+                            const unordered_map<z3::func_decl, term_abstraction>& termAbstraction,
+                            const unordered_map<z3::func_decl, variable_abstraction>& varAbstraction) {
     vector<const term*> args;
     args.reserve(expr.num_args());
     for (const auto& arg : expr.args())

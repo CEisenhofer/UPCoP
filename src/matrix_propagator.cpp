@@ -3,8 +3,91 @@
 constexpr unsigned MAX_FINAL_STEPS = 10000;
 constexpr unsigned MAX_FINAL_PATHS = 1;
 
+
+large_array::large_array(unsigned size) : size(size) {
+    if (size < (1 << 14)) {
+        small = make_optional(vector<const subterm_hint*>());
+        small->resize((size_t)size * size);
+        large = nullopt;
+    } else {
+        small = nullopt;
+        large = make_optional(unordered_map<pair<unsigned, unsigned>, const subterm_hint*>(14591 /* some large prime */));
+    }
+}
+
+large_array::~large_array() {
+    if (small.has_value()) {
+        for (const subterm_hint* r: small.value()) {
+            if (r != nullptr && !is_invalid(r))
+                delete r;
+        }
+    } else {
+        for (auto r: large.value()) {
+            if (r.second != nullptr && !is_invalid(r.second))
+                delete r.second;
+        }
+    }
+}
+
+const subterm_hint* large_array::get(unsigned i, unsigned j) const {
+    if (small.has_value())
+        return (*small)[i * size + j];
+    const subterm_hint* res = nullptr;
+    if (tryGetValue(*large, make_pair(i, j), res))
+        return res;
+    return nullptr;
+}
+
+void large_array::set(unsigned i, unsigned j, const subterm_hint* hint) {
+    if (small.has_value()) {
+        assert((*small)[i * size + j] == nullptr);
+        (*small)[i * size + j] = hint;
+        return;
+    }
+    assert(large->find(make_pair(i, j)) == large->end());
+    large->insert(make_pair(make_pair(i, j), hint));
+}
+
+void subterm_hint::get_pos_constraints(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2, vector<formula>& constraints) const {
+    auto [lhsCpy, rhsCpy] = get_cpy_idx(l1, l2);
+    for (auto [lhs, rhs]: equalities) {
+        formula e = propagator.term_solver.make_equality_expr(lhs->get_instance(lhsCpy, propagator), rhs->get_instance(rhsCpy, propagator));
+        if (e->is_false()) {
+            constraints.resize(0);
+            constraints.push_back(propagator.m.mk_false());
+            return;
+        }
+        if (e->is_true())
+            continue;
+        constraints.push_back(e);
+    }
+}
+
+formula subterm_hint::get_neg_constraints(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2) const {
+    auto [lhsCpy, rhsCpy] = get_cpy_idx(l1, l2);
+    vector<formula_term*> orList;
+    for (const auto& [lhs, rhs] : equalities) {
+        formula e = propagator.term_solver.make_equality_expr(lhs->get_instance(lhsCpy, propagator), rhs->get_instance(rhsCpy, propagator));
+        if (e->is_false())
+            return propagator.m.mk_true();
+        if (e->is_true())
+            continue;
+        orList.push_back(propagator.m.mk_not(e));
+    }
+    return propagator.m.mk_or(orList);
+}
+
+bool subterm_hint::is_satisfied(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2) const {
+    auto [lhsCpy, rhsCpy] = get_cpy_idx(l1, l2);
+    for (const auto& [lhs, rhs]: equalities) {
+        if (!complex_adt_solver::are_equal(lhs->get_instance(lhsCpy, propagator), rhs->get_instance(rhsCpy, propagator)))
+            return false;
+    }
+    return true;
+}
+
 matrix_propagator::matrix_propagator(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt, unsigned timeLeft) :
-        propagator_base(cnf, adtSolver, progParams, literalCnt, timeLeft), lvl(progParams.depth) {
+        propagator_base(cnf, adtSolver, progParams, timeLeft), unificationHints(literalCnt), lvl(progParams.depth) {
 
     assert(progParams.mode == Rectangle || progParams.mode == Core);
 
@@ -34,6 +117,40 @@ matrix_propagator::~matrix_propagator() {
     for (auto& clause : allClauses) {
         delete clause;
     }
+}
+
+const subterm_hint* matrix_propagator::cache_unification(const ground_literal& l1, const indexed_literal& l2) {
+    const subterm_hint* hint = unificationHints.get(l1.lit->Index, l2.Index);
+    if (hint != nullptr)
+        return hint;
+    if (l1.lit->nameID == l2.nameID &&
+        (hint = collect_constrain_unifiable(l1, l2)) != nullptr) {
+
+        unificationHints.set(l1.lit->Index, l2.Index, hint);
+        if (l2.Index != l1.lit->Index)
+            unificationHints.set(l2.Index, l1.lit->Index, hint->swap());
+        return hint;
+    }
+    unificationHints.set_invalid(l1.lit->Index, l2.Index);
+    if (l2.Index != l1.lit->Index)
+        unificationHints.set_invalid(l2.Index, l1.lit->Index);
+    return FAILED_PTR;
+}
+
+subterm_hint* matrix_propagator::collect_constrain_unifiable(const ground_literal& l1, const indexed_literal& l2) {
+    // l1 has to be ground; otw. P(:auto 0) [l1] and P(:auto 0) [l2] would say that they are always equal
+    auto* hint = new subterm_hint();
+    unsigned arity = l1.arity();
+
+    for (unsigned i = 0; i < arity; i++) {
+        const term* lhs = l1.lit->arg_bases[i];
+        const term* rhs = l2.arg_bases[i];
+        if (!lhs->seems_possibly_unifiable(rhs, *hint)) {
+            delete hint;
+            return nullptr;
+        }
+    }
+    return hint;
 }
 
 void matrix_propagator::create_instances() {
@@ -141,15 +258,6 @@ bool matrix_propagator::next_level_core() {
     assert(progParams.multiplicity[maxVar] <= 1 || !matrix[maxVar]->Ground);
     LogN("Increase clause #" + to_string(maxVar) + " to " + to_string(progParams.multiplicity[maxVar]));
     return false;
-}
-
-clause_instance* matrix_propagator::create_clause_instance(const indexed_clause* clause, unsigned cpyIdx, literal selector) {
-    vector<ground_literal> instances;
-    instances.reserve(clause->literals.size());
-    for (auto* lit : clause->literals) {
-        instances.emplace_back(lit, cpyIdx);
-    }
-    return new clause_instance(clause, cpyIdx, selector, std::move(instances));
 }
 
 bool matrix_propagator::are_same_atom(const ground_literal& l1, const ground_literal& l2) {

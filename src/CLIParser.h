@@ -24,6 +24,7 @@ enum ConjStrategy : unsigned char {
 
 struct ProgParams {
     int timeout = 0;
+    bool fmb = false;
     IncStrategy mode = Rectangle;
     unsigned depth = 1;
     unsigned maxDepth = UINT_MAX;
@@ -45,7 +46,9 @@ struct ProgParams {
     }
 
 #else
+
     ProgParams() = default;
+
 #endif
 };
 

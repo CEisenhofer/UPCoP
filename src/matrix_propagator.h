@@ -23,6 +23,8 @@ struct clause_instance {
     clause_instance(clause_instance& other) = delete;
     auto operator=(clause_instance& other) = delete;
 
+    ~clause_instance() = default;
+
     clause_instance(const indexed_clause* clause, unsigned copyIdx, literal selectionExpr, vector<ground_literal> literals) :
             clause(clause), copyIdx(copyIdx), selector(selectionExpr),
 #ifndef PUSH_POP
@@ -78,6 +80,65 @@ struct clause_instance {
     string to_string() const { return std::to_string(copyIdx + 1) + ". copy of clause #" + std::to_string(clause->Index); }
 };
 
+
+class large_array final {
+    // This is fine, as the class is longer than one; the index is invalid for sure
+#define FAILED_PTR ((subterm_hint*)-1)
+    unsigned size;
+    optional<vector<const subterm_hint*>> small;
+    optional<unordered_map<pair<unsigned, unsigned>, const subterm_hint*>> large;
+
+public:
+
+    large_array(unsigned size);
+    ~large_array();
+
+    const subterm_hint* get(unsigned i, unsigned j) const;
+    void set(unsigned i, unsigned j, const subterm_hint* hint);
+    void set_invalid(unsigned i, unsigned j) {
+        return set(i, j, FAILED_PTR);
+    }
+    static bool is_invalid(const subterm_hint* hint) {
+        assert(hint != nullptr);
+        return hint == FAILED_PTR;
+    }
+};
+
+class subterm_hint final {
+
+    const bool swapped = false;
+    vector<pair<const term*, const term*>> equalities;
+
+public:
+
+    subterm_hint() = default;
+
+    subterm_hint(vector<pair<const term*, const term*>> equalities, bool swapped) : swapped(swapped), equalities(std::move(equalities)) { }
+
+    void get_pos_constraints(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2, vector<formula>& constraints) const;
+    formula get_neg_constraints(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2) const;
+
+    bool is_satisfied(matrix_propagator& propagator, const ground_literal& l1, const ground_literal& l2) const;
+
+    inline pair<int, int> get_cpy_idx(const ground_literal& l1, const ground_literal& l2) const {
+        // return (l1.CopyIndex, l2.CopyIndex);
+        return !swapped ? make_pair(l1.copyIdx, l2.copyIdx) : make_pair(l2.copyIdx, l1.copyIdx);
+    }
+
+    bool tautology() const {
+        return equalities.empty();
+    }
+
+    subterm_hint* swap() const {
+        return new subterm_hint(equalities, !swapped);
+    }
+
+    void add(const term* t1, const term* t2) {
+        equalities.emplace_back(t1, t2);
+    }
+};
+
+
 struct path_element {
     const clause_instance& clause;
     const ground_literal lit;
@@ -86,6 +147,8 @@ struct path_element {
 };
 
 class matrix_propagator : public propagator_base {
+
+    large_array unificationHints;
 
     vector<vector<clause_instance*>> cachedClauses;
 
@@ -131,13 +194,23 @@ public:
 
 private:
 
+    const subterm_hint* cache_unification(const ground_literal& l1, const indexed_literal& l2);
+
+    inline const subterm_hint* cache_unification(const ground_literal& l1, const ground_literal& l2) {
+        return cache_unification(l1, *l2.lit);
+    }
+
+    // Return: null - infeasible to unify
+    // Returns 0 length - always unifies
+    // Returns n length - given n elements have (and could) unify
+    static subterm_hint* collect_constrain_unifiable(const ground_literal& l1, const indexed_literal& l2) ;
+
+
     void create_instances();
 
     bool next_level_core();
 
 public:
-
-    clause_instance* create_clause_instance(const indexed_clause* clause, unsigned cpyIdx, literal selector);
 
     bool are_same_atom(const ground_literal& l1, const ground_literal& l2);
 

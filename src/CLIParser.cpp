@@ -84,6 +84,11 @@ void parse_params(int argc, char* argv[], ProgParams& progParams) {
             i++;
             continue;
         }
+        if (current == "--fmb") {
+            progParams.fmb = true;
+            i++;
+            continue;
+        }
         if (current == "--check") {
             progParams.checkProof = true;
             i++;

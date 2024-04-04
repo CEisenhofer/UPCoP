@@ -49,7 +49,7 @@ add_executable(UPCoP
         ground_literal.cpp
         ground_literal.h
         formula.cpp
-)
+        fmb_propagator.cpp)
 
 target_link_libraries(UPCoP PRIVATE ${Z3_LIB})
 target_link_libraries(UPCoP PRIVATE ${CADICAL_LIB})
