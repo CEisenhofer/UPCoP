@@ -210,9 +210,10 @@ public:
                                 chosen[j]->literals[l], &prettyNames) << "\n";
 
                         for (int m = 0; m < chosen[i]->literals[k].arity(); m++) {
-                            bool res = term_solver.asserted_eq(this->m.mk_true(),
-                                                               chosen[i]->literals[k].lit->arg_bases[m]->get_instance(chosen[i]->copyIdx, *this),
-                                                               chosen[j]->literals[l].lit->arg_bases[m]->get_instance(chosen[j]->copyIdx, *this), true);
+                            justification just;
+                            auto* lhs = chosen[i]->literals[k].lit->arg_bases[m]->get_instance(chosen[i]->copyIdx, *this);
+                            auto* rhs = chosen[i]->literals[k].lit->arg_bases[m]->get_instance(chosen[i]->copyIdx, *this);
+                            bool res = lhs->t->solver.unify(lhs, rhs, just);
                             if (!res)
                                 throw solving_exception("Failed unification");
                         }

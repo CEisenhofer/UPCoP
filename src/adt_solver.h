@@ -244,10 +244,10 @@ public:
     bool less(literal just, term_instance* lhs, term_instance* rhs);
     tri_state test_less(literal just, term_instance* lhs, term_instance* rhs);
 
+    bool unify(term_instance* lhs, term_instance* rhs, justification& just);
 
 private:
 
-    bool unify(term_instance* lhs, term_instance* rhs, justification& just);
     z3::check_result non_unify(Lazy* lazy);
 
     bool check_containment_cycle(term_instance* inst, justification& just);
