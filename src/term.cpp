@@ -167,7 +167,11 @@ z3::expr term_instance::to_z3_us() {
     if (z3_expr.has_value())
         return *z3_expr;
 
+#if !defined(NDEBUG)
+    z3_expr = fresh_user_constant(t->solver.get_z3_us_sort().ctx(), to_string(), t->solver.get_z3_us_sort());
+#else
     z3_expr = fresh_user_constant(t->solver.get_z3_us_sort().ctx(), "term", t->solver.get_z3_us_sort());
+#endif
     t->solver.get_complex_solver().set_z3_expr(*z3_expr, this);
     return *z3_expr;
 }

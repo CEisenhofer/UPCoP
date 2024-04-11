@@ -634,6 +634,9 @@ bool simple_adt_solver::unify_split(term_instance* lhs, term_instance* rhs, just
     if (r1 == r2)
         return true;
 
+    assert(r1->origin == nullptr || r1->origin->value == sat);
+    assert(r2->origin == nullptr || r2->origin->value == sat);
+
     if (r1->t->is_const() && r2->t->is_const()) {
         just.push_equality(lhs, r1);
         just.push_equality(rhs, r2);
@@ -1185,6 +1188,8 @@ bool simple_adt_solver::add_root(term_instance* b, term_instance* newRoot, const
 bool simple_adt_solver::merge_root(term_instance* r1, term_instance* r2, const equality& eq) {
     assert(r1->is_root());
     assert(r2->is_root());
+    assert(r1->origin == nullptr || r1->origin->value == sat);
+    assert(r2->origin == nullptr || r2->origin->value == sat);
     if (r1 == r2)
         return true;
 

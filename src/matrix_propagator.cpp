@@ -507,6 +507,15 @@ bool matrix_propagator::delayed_rp(clause_instance* info) {
 
     // "Relevance propagation" of delayed equalities
     for (const auto& eq : info->delayedRelevantTrue) {
+        if (eq.RHS->origin != nullptr) {
+            if (eq.RHS->origin->value == unsat)
+                continue;
+            if (eq.RHS->origin->value == undef) {
+                eq.RHS->origin->delayedRelevantTrue.push_back(eq);
+                add_undo([eq]() { eq.RHS->origin->delayedRelevantTrue.pop_back(); });
+                continue;
+            }
+        }
         try {
             assert(
                     (is_smt() && eq.just.litJust.empty() && eq.just.eqJust.size() == 1 && eq.just.diseqJust.first == nullptr) ||
@@ -521,6 +530,15 @@ bool matrix_propagator::delayed_rp(clause_instance* info) {
         }
     }
     for (const auto& eq : info->delayedRelevantFalse) {
+        if (eq.RHS->origin != nullptr) {
+            if (eq.RHS->origin->value == unsat)
+                continue;
+            if (eq.RHS->origin->value == undef) {
+                eq.RHS->origin->delayedRelevantFalse.push_back(eq);
+                add_undo([eq]() { eq.RHS->origin->delayedRelevantFalse.pop_back(); });
+                continue;
+            }
+        }
         try {
             assert(
                     (is_smt() && eq.just.litJust.empty() && eq.just.eqJust.empty() && eq.just.diseqJust.first != nullptr) ||
@@ -535,6 +553,15 @@ bool matrix_propagator::delayed_rp(clause_instance* info) {
         }
     }
     for (const auto& less : info->delayedRelevantLess) {
+        if (less.RHS->origin != nullptr) {
+            if (less.RHS->origin->value == unsat)
+                continue;
+            if (less.RHS->origin->value == undef) {
+                less.RHS->origin->delayedRelevantLess.push_back(less);
+                add_undo([less]() { less.RHS->origin->delayedRelevantLess.pop_back(); });
+                continue;
+            }
+        }
         try {
             LogN("Delayed: " << less.to_string());
             literal lit = term_solver.make_less_atom(less.LHS, less.RHS);
@@ -724,8 +751,10 @@ void matrix_propagator::final() {
                     assert(unification != nullptr);
                     if (!large_array::is_invalid(unification) && path[i].lit.lit->polarity != path[j].lit.lit->polarity) {
                         unification->get_pos_constraints(*this, path[i].lit, path[j].lit, unificationConstraint);
-                        if (!unificationConstraint.empty())
+                        if (!unificationConstraint.empty()) {
                             constraints.push_back(m.mk_and(unificationConstraint));
+                            LogN(m.mk_and(unificationConstraint)->to_string());
+                        }
                     }
                 }
             }

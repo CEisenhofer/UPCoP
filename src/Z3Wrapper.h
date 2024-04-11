@@ -138,6 +138,7 @@ public:
     static z3_propagator* create(propagator_base* base, unsigned timeLeft) {
         auto* ctx = new z3::context();
         auto* s = new z3::solver(*ctx, z3::solver::simple());
+        // s->set("smt.relevancy", (unsigned)0);
         return new z3_propagator(ctx, s, base, timeLeft);
     }
 
