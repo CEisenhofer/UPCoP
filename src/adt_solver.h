@@ -55,7 +55,7 @@ public:
     bool asserted_eq(justification just, term_instance* lhs, term_instance* rhs, bool isTrue) const;
     bool asserted_less(literal e, term_instance* lhs, term_instance* rhs) const;
 
-    bool try_assert_eq(equality info, bool isTrue);
+    void try_assert_eq(equality info, bool isTrue);
 
     bool contains_cycle(term_instance* t, term_instance* c) const;
     bool preprocess_equality(term_instance* lhs, term_instance* rhs, vector<equality>& subproblems);

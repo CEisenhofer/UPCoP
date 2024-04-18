@@ -233,12 +233,6 @@ void z3_propagator::push() {
 void z3_propagator::pop(unsigned lvl) {
     assert(undo_stack_limit.size() >= lvl);
     unsigned new_level = undo_stack_limit.size() - lvl;
-    if (new_level >= undo_stack_limit.size()) {
-        // CaDiCal went crazy - let's ignore
-        assert(new_level == 0);
-        assert(undo_stack_limit.empty());
-        return;
-    }
     LogN("Pop to " << new_level);
 
     base->clear_conflict();

@@ -80,48 +80,53 @@ bool complex_adt_solver::asserted(literal e, bool isTrue) {
     if (!propagator().is_smt() && !isTrue) {
         assert(info.just.litJust.size() == 1 && info.just.eqJust.empty() && info.just.litJust[0] == e);
         equality info2(info.LHS, info.RHS, { propagator().m.mk_not(info.just.litJust[0]) });
-        return try_assert_eq(info2, isTrue);
+        try_assert_eq(info2, isTrue);
+        return true;
     }
-    return try_assert_eq(info, isTrue);
+    try_assert_eq(info, isTrue);
+    return true;
 }
 
-bool complex_adt_solver::try_assert_eq(equality info, bool isTrue) {
+void complex_adt_solver::try_assert_eq(equality info, bool isTrue) {
     assert(info.just.empty() || (propagator().is_smt() == !info.just.eqJust.empty()));
 
-    clause_instance* lhsInfo = info.LHS->origin;
-    clause_instance* rhsInfo = info.RHS->origin;
-    assert(!(info.LHS->t->is_const() && info.RHS->t->is_const()));
-    assert(lhsInfo != nullptr || rhsInfo != nullptr);
+    if (!propagator().is_smt()) {
+        // this does not make sense if we have an equality solver, as it might give us two arbitrary terms chosen as representatives
+        clause_instance* lhsInfo = info.LHS->origin;
+        clause_instance* rhsInfo = info.RHS->origin;
+        assert(!(info.LHS->t->is_const() && info.RHS->t->is_const()));
+        assert(lhsInfo != nullptr || rhsInfo != nullptr);
 
-    if ((lhsInfo != nullptr && lhsInfo->value == unsat) || (rhsInfo != nullptr && rhsInfo->value == unsat)) {
-        LogN("Dropped");
-        return false;
+        if ((lhsInfo != nullptr && lhsInfo->value == unsat) || (rhsInfo != nullptr && rhsInfo->value == unsat)) {
+            LogN("Dropped");
+            return;
+        }
+        if (lhsInfo != nullptr && lhsInfo->value == undef) {
+            LogN("Shelved");
+            if (isTrue) {
+                lhsInfo->delayedRelevantTrue.push_back(std::move(info));
+                propagator().add_undo([lhsInfo]() { lhsInfo->delayedRelevantTrue.pop_back(); });
+            }
+            else {
+                lhsInfo->delayedRelevantFalse.push_back(std::move(info));
+                propagator().add_undo([lhsInfo]() { lhsInfo->delayedRelevantFalse.pop_back(); });
+            }
+            return;
+        }
+        if (rhsInfo != nullptr && rhsInfo->value == undef) {
+            LogN("Shelved");
+            if (isTrue) {
+                rhsInfo->delayedRelevantTrue.push_back(std::move(info));
+                propagator().add_undo([rhsInfo]() { rhsInfo->delayedRelevantTrue.pop_back(); });
+            }
+            else {
+                rhsInfo->delayedRelevantFalse.push_back(std::move(info));
+                propagator().add_undo([rhsInfo]() { rhsInfo->delayedRelevantFalse.pop_back(); });
+            }
+            return;
+        }
+        LogN("Processed");
     }
-    if (lhsInfo != nullptr && lhsInfo->value == undef) {
-        LogN("Shelved");
-        if (isTrue) {
-            lhsInfo->delayedRelevantTrue.push_back(std::move(info));
-            propagator().add_undo([lhsInfo]() { lhsInfo->delayedRelevantTrue.pop_back(); });
-        }
-        else {
-            lhsInfo->delayedRelevantFalse.push_back(std::move(info));
-            propagator().add_undo([lhsInfo]() { lhsInfo->delayedRelevantFalse.pop_back(); });
-        }
-        return true;
-    }
-    if (rhsInfo != nullptr && rhsInfo->value == undef) {
-        LogN("Shelved");
-        if (isTrue) {
-            rhsInfo->delayedRelevantTrue.push_back(std::move(info));
-            propagator().add_undo([rhsInfo]() { rhsInfo->delayedRelevantTrue.pop_back(); });
-        }
-        else {
-            rhsInfo->delayedRelevantFalse.push_back(std::move(info));
-            propagator().add_undo([rhsInfo]() { rhsInfo->delayedRelevantFalse.pop_back(); });
-        }
-        return true;
-    }
-    LogN("Processed");
 
     try {
         asserted_eq(info.just, info.LHS, info.RHS, isTrue);
@@ -130,7 +135,6 @@ bool complex_adt_solver::try_assert_eq(equality info, bool isTrue) {
         cout << "Crashed unify" << endl;
         exit(132);
     }
-    return true;
 }
 
 bool complex_adt_solver::asserted_eq(justification just, term_instance* lhs, term_instance* rhs, bool isTrue) const {
@@ -605,6 +609,8 @@ bool simple_adt_solver::update_diseq(term_instance* b, term_instance* newRoot) {
                 return false;
             case z3::check_result::unknown:
                 newRoot->diseq_watches.push_back(info);
+                break;
+            case z3::sat:
                 break;
         }
     }

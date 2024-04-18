@@ -505,51 +505,53 @@ bool matrix_propagator::delayed_rp(clause_instance* info) {
         // The current clause is not connected to a relevant clause
         return;*/
 
-    // "Relevance propagation" of delayed equalities
-    for (const auto& eq : info->delayedRelevantTrue) {
-        if (eq.RHS->origin != nullptr) {
-            if (eq.RHS->origin->value == unsat)
-                continue;
-            if (eq.RHS->origin->value == undef) {
-                eq.RHS->origin->delayedRelevantTrue.push_back(eq);
-                add_undo([eq]() { eq.RHS->origin->delayedRelevantTrue.pop_back(); });
-                continue;
+    if (!is_smt()) {
+        // "Relevance propagation" of delayed equalities
+        for (const auto& eq : info->delayedRelevantTrue) {
+            if (eq.RHS->origin != nullptr) {
+                if (eq.RHS->origin->value == unsat)
+                    continue;
+                if (eq.RHS->origin->value == undef) {
+                    eq.RHS->origin->delayedRelevantTrue.push_back(eq);
+                    add_undo([eq]() { eq.RHS->origin->delayedRelevantTrue.pop_back(); });
+                    continue;
+                }
+            }
+            try {
+                assert(
+                        (is_smt() && eq.just.litJust.empty() && eq.just.eqJust.size() == 1 && eq.just.diseqJust.first == nullptr) ||
+                        (!is_smt() && eq.just.litJust.size() == 1 && eq.just.eqJust.empty() && eq.just.diseqJust.first == nullptr));
+                LogN("Delayed: " << eq.to_string() << " := 1");
+                if (!term_solver.asserted_eq(eq.just, eq.LHS, eq.RHS, true))
+                    return false;
+            }
+            catch (...) {
+                cout << "Crashed unify" << endl;
+                exit(132);
             }
         }
-        try {
-            assert(
-                    (is_smt() && eq.just.litJust.empty() && eq.just.eqJust.size() == 1 && eq.just.diseqJust.first == nullptr) ||
-                    (!is_smt() && eq.just.litJust.size() == 1 && eq.just.eqJust.empty() && eq.just.diseqJust.first == nullptr));
-            LogN("Delayed: " << eq.to_string() << " := 1");
-            if (!term_solver.asserted_eq(eq.just, eq.LHS, eq.RHS, true))
-                return false;
-        }
-        catch (...) {
-            cout << "Crashed unify" << endl;
-            exit(132);
-        }
-    }
-    for (const auto& eq : info->delayedRelevantFalse) {
-        if (eq.RHS->origin != nullptr) {
-            if (eq.RHS->origin->value == unsat)
-                continue;
-            if (eq.RHS->origin->value == undef) {
-                eq.RHS->origin->delayedRelevantFalse.push_back(eq);
-                add_undo([eq]() { eq.RHS->origin->delayedRelevantFalse.pop_back(); });
-                continue;
+        for (const auto& eq : info->delayedRelevantFalse) {
+            if (eq.RHS->origin != nullptr) {
+                if (eq.RHS->origin->value == unsat)
+                    continue;
+                if (eq.RHS->origin->value == undef) {
+                    eq.RHS->origin->delayedRelevantFalse.push_back(eq);
+                    add_undo([eq]() { eq.RHS->origin->delayedRelevantFalse.pop_back(); });
+                    continue;
+                }
             }
-        }
-        try {
-            assert(
-                    (is_smt() && eq.just.litJust.empty() && eq.just.eqJust.empty() && eq.just.diseqJust.first != nullptr) ||
-                    (!is_smt() && eq.just.litJust.size() == 1 && eq.just.eqJust.empty() && eq.just.diseqJust.first == nullptr));
-            LogN("Delayed: " << eq.to_string() << " := 0");
-            if (!term_solver.asserted_eq(eq.just, eq.LHS, eq.RHS, false))
-                return false;
-        }
-        catch (...) {
-            cout << "Crashed unify" << endl;
-            exit(132);
+            try {
+                assert(
+                        (is_smt() && eq.just.litJust.empty() && eq.just.eqJust.empty() && eq.just.diseqJust.first != nullptr) ||
+                        (!is_smt() && eq.just.litJust.size() == 1 && eq.just.eqJust.empty() && eq.just.diseqJust.first == nullptr));
+                LogN("Delayed: " << eq.to_string() << " := 0");
+                if (!term_solver.asserted_eq(eq.just, eq.LHS, eq.RHS, false))
+                    return false;
+            }
+            catch (...) {
+                cout << "Crashed unify" << endl;
+                exit(132);
+            }
         }
     }
     for (const auto& less : info->delayedRelevantLess) {
@@ -647,6 +649,11 @@ void matrix_propagator::final() {
         return;
 
     finalCnt++;
+
+    z3Propagator->debug = finalCnt == 2;
+    if (z3Propagator->debug) {
+        LogN("Buggy final");
+    }
 
     start_watch(final_time);
     assert(!chosen.empty());
@@ -805,6 +812,8 @@ void matrix_propagator::final() {
             hard_propagate(just, m.mk_or(constraints));
         }
     }
+    if (z3Propagator->debug)
+        exit(-11);
 }
 
 void matrix_propagator::find_path(int clauseIdx, const vector<clause_instance*>& clauses, vector<path_element>& path, vector<vector<path_element>>& foundPaths, unsigned& steps) {
