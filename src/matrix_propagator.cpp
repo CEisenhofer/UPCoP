@@ -650,11 +650,6 @@ void matrix_propagator::final() {
 
     finalCnt++;
 
-    z3Propagator->debug = finalCnt == 2;
-    if (z3Propagator->debug) {
-        LogN("Buggy final");
-    }
-
     start_watch(final_time);
     assert(!chosen.empty());
     assert(progParams.mode != Rectangle || chosen.size() == lvl);
@@ -812,8 +807,6 @@ void matrix_propagator::final() {
             hard_propagate(just, m.mk_or(constraints));
         }
     }
-    if (z3Propagator->debug)
-        exit(-11);
 }
 
 void matrix_propagator::find_path(int clauseIdx, const vector<clause_instance*>& clauses, vector<path_element>& path, vector<vector<path_element>>& foundPaths, unsigned& steps) {
