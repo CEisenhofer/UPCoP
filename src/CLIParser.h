@@ -12,6 +12,7 @@ enum InputFormat : unsigned char {
 enum IncStrategy : unsigned char {
     Core,
     Rectangle,
+    Hybrid,
 };
 
 enum ConjStrategy : unsigned char {

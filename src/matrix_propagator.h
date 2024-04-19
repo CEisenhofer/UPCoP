@@ -116,7 +116,7 @@ public:
         if (progParams.mode == Core)
             return next_level_core();
 
-        assert(progParams.mode == Rectangle);
+        assert(progParams.mode == Rectangle || progParams.mode == Hybrid);
         for (unsigned i = 0; i < matrix.size(); i++) {
             if (matrix[i]->Ground && progParams.multiplicity[i] > 0)
                 continue;

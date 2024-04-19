@@ -134,7 +134,7 @@ static void deleteCNF(cnf<indexed_clause*>& root) {
 }
 
 void prep_rect(cnf<indexed_clause*>& matrix, ProgParams& progParams) {
-    assert(progParams.mode == Rectangle);
+    assert(progParams.mode == Rectangle || progParams.mode == Hybrid);
     for (int i = 0; i < matrix.size(); i++) {
         if (matrix[i]->Ground) {
             progParams.multiplicity.push_back(1);
@@ -267,7 +267,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         std::flush(cout);
     }
 
-    if (progParams.mode == Rectangle) {
+    if (progParams.mode == Rectangle || progParams.mode == Hybrid) {
         prep_rect(cnf, progParams);
     }
     else {

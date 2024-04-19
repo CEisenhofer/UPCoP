@@ -73,6 +73,8 @@ void parse_params(int argc, char* argv[], ProgParams& progParams) {
                 progParams.mode = Rectangle;
             else if (next == "core")
                 progParams.mode = Core;
+            else if (next == "hybrid")
+                progParams.mode = Hybrid;
             else
                 CrashParams("Unknown mode: " + std::string(argv[i + 1]));
             i += 2;

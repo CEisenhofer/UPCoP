@@ -6,7 +6,7 @@ constexpr unsigned MAX_FINAL_PATHS = 1;
 matrix_propagator::matrix_propagator(cnf<indexed_clause*>& cnf, complex_adt_solver& adtSolver, ProgParams& progParams, unsigned literalCnt, unsigned timeLeft) :
         propagator_base(cnf, adtSolver, progParams, literalCnt, timeLeft), lvl(progParams.depth) {
 
-    assert(progParams.mode == Rectangle || progParams.mode == Core);
+    assert(progParams.mode == Rectangle || progParams.mode == Core || progParams.mode == Hybrid);
 
     cachedClauses.resize(matrix.size());
 
@@ -761,7 +761,7 @@ void matrix_propagator::final() {
                 }
             }
 
-            if (progParams.mode == Core) {
+            if (progParams.mode == Core || progParams.mode == Hybrid) {
                 for (auto elem : path) {
                     for (unsigned i = 0; i < matrix.size(); i++) {
                         indexed_clause* cl = matrix[i];
@@ -788,13 +788,13 @@ void matrix_propagator::final() {
                                         break;
                                 }
                             }
-                            if (maxId >= cachedClause.size()) {
-                                constraints.push_back(m.mk_not(clauseLimitListExpr[i]));
-                            }
-                            else {
+                            if (maxId < cachedClause.size()) {
                                 vector<formula> cnstr = { cachedClause[maxId]->selector };
                                 unification->get_pos_constraints(*this, elem.lit, cachedClause[maxId]->literals[j], cnstr);
                                 constraints.push_back(m.mk_and(cnstr));
+                            }
+                            else if (progParams.mode == Core) {
+                                constraints.push_back(m.mk_not(clauseLimitListExpr[i]));
                             }
                         }
                     }
