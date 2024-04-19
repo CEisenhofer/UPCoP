@@ -50,6 +50,10 @@ public:
     CaDiCaL::Solver* solver = nullptr;
     formula_manager m;
 
+    inline unsigned decision_level() const {
+        return  undo_stack_limit.size();
+    }
+
     tri_state check() {
         switch (solver->solve()) {
             case 10:
@@ -115,7 +119,7 @@ public:
         solver->clause(v->get_lit());
     }
 
-    inline void add_assertion(vector<literal> v) const {
+    inline void add_assertion(const vector<literal>& v) const {
         for (literal l : v) {
             solver->add(l->get_lit());
         }
@@ -200,4 +204,6 @@ protected:
     bool cb_has_external_clause(bool& is_forgettable) final;
 
     int cb_add_external_clause_lit() final;
+
+    int cb_decide() final;
 };

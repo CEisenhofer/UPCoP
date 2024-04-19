@@ -75,7 +75,7 @@ struct clause_instance {
         b->parent = newRoot;
     }
 
-    string to_string() const { return std::to_string(copyIdx + 1) + ". copy of clause #" + std::to_string(clause->Index); }
+    string to_string() const { return std::to_string(copyIdx + 1) + ". copy of clause #" + std::to_string(clause->index); }
 };
 
 struct path_element {
@@ -102,6 +102,7 @@ class matrix_propagator : public propagator_base {
 
     int finalCnt = 0;
 
+    bool selectedConjecture = false;
     bool hasLimFalse = false;
     bool pbPropagated = false;
 
@@ -118,7 +119,7 @@ public:
 
         assert(progParams.mode == Rectangle || progParams.mode == Hybrid);
         for (unsigned i = 0; i < matrix.size(); i++) {
-            if (matrix[i]->Ground && progParams.multiplicity[i] > 0)
+            if (matrix[i]->ground && progParams.multiplicity[i] > 0)
                 continue;
             progParams.multiplicity[i] = progParams.depth;
         }
@@ -144,6 +145,8 @@ public:
     bool are_connected(const ground_literal& l1, const ground_literal& l2) {
         return l1.lit->polarity != l2.lit->polarity && are_same_atom(l1, l2);
     }
+
+    void push() override;
 
     void check_proof(z3::context& ctx);
 
@@ -174,6 +177,8 @@ public:
 
     void final() override;
 
+    literal decide() final;
+
     void find_path(int clauseIdx, const vector<clause_instance*>& clauses, vector<path_element>& path, vector<vector<path_element>>& foundPaths, unsigned& steps);
 
     void find_path_sat(const vector<clause_instance*>& clauses, vector<vector<path_element>>& foundPaths);
@@ -182,19 +187,19 @@ public:
         int clauseCnt = 1;
         unordered_map<clause_instance*, int> clauseToCnt;
         sort(chosen.begin(), chosen.end(), [](const clause_instance* c1, const clause_instance* c2) {
-            if (c1->clause->Index == c2->clause->Index)
+            if (c1->clause->index == c2->clause->index)
                 return c1->copyIdx < c2->copyIdx;
-            return c1->clause->Index < c2->clause->Index;
+            return c1->clause->index < c2->clause->index;
         });
 
         for (auto& clause : chosen) {
             clauseToCnt.insert(make_pair(clause, clauseCnt));
-            std::cout << "Clause &" << clauseCnt++ << " (#" << clause->clause->Index << "/" << clause->copyIdx << "): " << clause_to_string(clause->literals, &prettyNames) << "\n";
+            std::cout << "Clause &" << clauseCnt++ << " (#" << clause->clause->index << "/" << clause->copyIdx << "): " << clause_to_string(clause->literals, &prettyNames) << "\n";
             int cnt = 0;
-            if (tryGetValue(usedClauses, clause->clause->Index, cnt))
-                usedClauses[clause->clause->Index] = cnt + 1;
+            if (tryGetValue(usedClauses, clause->clause->index, cnt))
+                usedClauses[clause->clause->index] = cnt + 1;
             else
-                usedClauses.insert(make_pair(clause->clause->Index, 1));
+                usedClauses.insert(make_pair(clause->clause->index, 1));
         }
 
         // TODO: Do we really need that many loops?

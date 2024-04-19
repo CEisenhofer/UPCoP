@@ -136,7 +136,7 @@ static void deleteCNF(cnf<indexed_clause*>& root) {
 void prep_rect(cnf<indexed_clause*>& matrix, ProgParams& progParams) {
     assert(progParams.mode == Rectangle || progParams.mode == Hybrid);
     for (int i = 0; i < matrix.size(); i++) {
-        if (matrix[i]->Ground) {
+        if (matrix[i]->ground) {
             progParams.multiplicity.push_back(1);
             continue;
         }
@@ -148,7 +148,7 @@ void prep_core(cnf<indexed_clause*>& matrix, ProgParams& progParams) {
     assert(progParams.mode == Core);
     for (int c = 0; c < matrix.size(); c++) {
         progParams.priority.push_back(0);
-        if (matrix[c]->Conjecture)
+        if (matrix[c]->conjecture)
             progParams.multiplicity.push_back(1);
         else
             progParams.multiplicity.push_back(0);
@@ -202,7 +202,7 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         auto* clause = cnf[i];
         bool allPos = true;
         bool allNeg = true;
-        conjectureCnt += (unsigned)clause->Conjecture;
+        conjectureCnt += (unsigned)clause->conjecture;
         for (const auto& lit : clause->literals) {
             if (allPos && !lit->polarity)
                 allPos = false;
@@ -249,20 +249,20 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
 
     if (progParams.conjectures != Keep) {
         for (unsigned i = 0; i < cnf.size(); i++) {
-            cnf[i]->Conjecture = false;
+            cnf[i]->conjecture = false;
         }
         for (auto* c : new_conj) {
-            c->Conjecture = true;
+            c->conjecture = true;
         }
     }
 
-    assert(std::any_of(cnf.clauses.begin(), cnf.clauses.end(), [](const auto* x) { return x->Conjecture; }));
+    assert(std::any_of(cnf.clauses.begin(), cnf.clauses.end(), [](const auto* x) { return x->conjecture; }));
 
     if (!silent) {
         cout << "Input file: " + path << "\n";
         cout << cnf.size() << " Clauses:\n";
         for (unsigned i = 0; i < cnf.size(); i++) {
-            cout << "\tClause #" << i << ": " << cnf[i]->to_string() << (cnf[i]->Conjecture ? "*" : "") << "\n";
+            cout << "\tClause #" << i << ": " << cnf[i]->to_string() << (cnf[i]->conjecture ? "*" : "") << "\n";
         }
         std::flush(cout);
     }
@@ -513,9 +513,9 @@ cnf<indexed_clause*> to_cnf(const z3::expr& input, complex_adt_solver& adtSolver
             literals.push_back(indexed);
         }
 
-        sort(literals.begin(), literals.end(), [](auto o1, auto o2) { return o1->Index < o2->Index; });
+        sort(literals.begin(), literals.end(), [](auto o1, auto o2) { return o1->index < o2->index; });
         auto* cl = new(nextPtr) indexed_clause(clauseIdx++, literals, vars);
-        cl->Conjecture = entry.Conjecture;
+        cl->conjecture = entry.Conjecture;
         newClauses.push_back(cl);
     }
 

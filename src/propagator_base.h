@@ -96,6 +96,7 @@ protected:
 
     ProgParams& progParams;
     const cnf<indexed_clause*>& matrix;
+    vector<literal> root;
 
     std::vector<action> undo_stack;
 
@@ -209,11 +210,11 @@ public:
             z3Propagator->add_assertion(v);
     }
 
-    inline void add_assertion(vector<literal> v) const {
+    inline void add_assertion(const vector<literal>& v) const {
         if (cadicalPropagator != nullptr)
-            cadicalPropagator->add_assertion(std::move(v));
+            cadicalPropagator->add_assertion(v);
         else
-            z3Propagator->add_assertion(std::move(v));
+            z3Propagator->add_assertion(v);
     }
 
     inline bool failed(literal v) const {
@@ -222,6 +223,10 @@ public:
 
     inline bool get_value(literal v, bool& value) const {
         return cadicalPropagator != nullptr ? cadicalPropagator->get_value(v, value) : z3Propagator->get_value(v, value);
+    }
+
+    inline unsigned decision_level() const {
+        return cadicalPropagator != nullptr ? cadicalPropagator->decision_level() : z3Propagator->decision_level();
     }
 
     inline tri_state check() const {
@@ -261,8 +266,10 @@ public:
         return pretty_print_literal(l.lit, l.copyIdx, prettyNames);
     }
 
+    virtual void push() = 0;
     virtual void fixed(literal e, bool value) = 0;
     virtual void final() = 0;
+    virtual literal decide() = 0;
 
     inline vector<action>& get_undo() {
         return undo_stack;

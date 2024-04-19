@@ -54,17 +54,17 @@ namespace std {
 
 struct indexed_literal : public fo_literal {
 
-    const unsigned Index;
+    const unsigned index;
 
     indexed_literal() = delete;
     indexed_literal(const indexed_literal&) = delete;
     indexed_literal& operator=(const indexed_literal&) = delete;
 
-    indexed_literal(const fo_literal& lit, unsigned index) : fo_literal(lit.name, lit.nameID, lit.polarity, lit.arg_bases), Index(index) { }
+    indexed_literal(const fo_literal& lit, unsigned index) : fo_literal(lit.name, lit.nameID, lit.polarity, lit.arg_bases), index(index) { }
 
     inline bool operator==(const indexed_literal& l) const {
-        assert((Index == l.Index) == (this == &l));
-        return Index == l.Index;
+        assert((index == l.index) == (this == &l));
+        return index == l.index;
     }
 
     inline bool operator!=(const indexed_literal& l) const {
@@ -76,7 +76,7 @@ namespace std {
     template<>
     struct hash<indexed_literal> {
         inline size_t operator()(const indexed_literal& l) const {
-            return l.Index;
+            return l.index;
         }
     };
 }

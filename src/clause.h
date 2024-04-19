@@ -65,9 +65,9 @@ struct TautologyHint {
 struct indexed_clause {
     const vector<indexed_literal*> literals;
     const vector<term*> variables;
-    const unsigned Index;
-    const bool Ground;
-    bool Conjecture = false;
+    const unsigned index;
+    const bool ground;
+    bool conjecture = false;
 
     unsigned size() const { return literals.size(); }
 
@@ -86,9 +86,9 @@ struct indexed_clause {
     indexed_clause(unsigned index, vector<indexed_literal*> literals, vector<term*> variables);
 
     bool operator==(const indexed_clause& c) const {
-        assert((Index == c.Index) == (this == &c));
-        assert(Index != c.Index || Ground == c.Ground);
-        return Index == c.Index;
+        assert((index == c.index) == (this == &c));
+        assert(index != c.index || ground == c.ground);
+        return index == c.index;
     }
 
     bool operator!=(const indexed_clause& c) const {
@@ -106,7 +106,7 @@ namespace std {
     template<>
     struct hash<indexed_clause> {
         inline size_t operator()(const indexed_clause& c) const {
-            return c.Index;
+            return c.index;
         }
     };
 }

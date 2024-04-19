@@ -59,6 +59,10 @@ public:
         return get_expr(lit->get_lit());
     }
 
+    inline unsigned decision_level() const {
+        return undo_stack_limit.size();
+    }
+
     tri_state check() {
         core.clear();
         coreQueried = false;
@@ -108,7 +112,7 @@ public:
         s->add(get_expr(v));
     }
 
-    inline void add_assertion(vector<literal> v) {
+    inline void add_assertion(const vector<literal>& v) {
         // TODO: Do this over the formula manager
         z3::expr_vector vec(*ctx);
         for (auto&& lit : v) {
@@ -195,6 +199,11 @@ protected:
     void pop(unsigned lvl) final;
 
     void final() final;
+
+public:
+    void decide(const z3::expr& expr, unsigned int i, bool b) override;
+
+protected:
 
     void created(const z3::expr& e) final {
     }

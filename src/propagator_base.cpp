@@ -133,20 +133,20 @@ subterm_hint* propagator_base::collect_constrain_unifiable(const ground_literal&
 }
 
 const subterm_hint* propagator_base::cache_unification(const ground_literal& l1, const indexed_literal& l2) {
-    const subterm_hint* hint = unificationHints.get(l1.lit->Index, l2.Index);
+    const subterm_hint* hint = unificationHints.get(l1.lit->index, l2.index);
     if (hint != nullptr)
         return hint;
     if (l1.lit->nameID == l2.nameID &&
         (hint = collect_constrain_unifiable(l1, l2)) != nullptr) {
 
-        unificationHints.set(l1.lit->Index, l2.Index, hint);
-        if (l2.Index != l1.lit->Index)
-            unificationHints.set(l2.Index, l1.lit->Index, hint->swap());
+        unificationHints.set(l1.lit->index, l2.index, hint);
+        if (l2.index != l1.lit->index)
+            unificationHints.set(l2.index, l1.lit->index, hint->swap());
         return hint;
     }
-    unificationHints.set_invalid(l1.lit->Index, l2.Index);
-    if (l2.Index != l1.lit->Index)
-        unificationHints.set_invalid(l2.Index, l1.lit->Index);
+    unificationHints.set_invalid(l1.lit->index, l2.index);
+    if (l2.index != l1.lit->index)
+        unificationHints.set_invalid(l2.index, l1.lit->index);
     return FAILED_PTR;
 }
 

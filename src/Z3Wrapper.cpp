@@ -228,6 +228,7 @@ void z3_propagator::diseq(const z3::expr& lhs, const z3::expr& rhs) {
 void z3_propagator::push() {
     LogN("Pushed " + to_string(undo_stack_limit.size()));
     undo_stack_limit.push_back(base->get_undo().size());
+    base->push();
 }
 
 void z3_propagator::pop(unsigned lvl) {
@@ -249,4 +250,11 @@ void z3_propagator::pop(unsigned lvl) {
 void z3_propagator::final() {
     assert(!base->is_conflict());
     base->final();
+}
+
+void z3_propagator::decide(const z3::expr& expr, unsigned bit, bool value) {
+    literal lit = base->decide();
+    if (!lit->is_literal())
+        return;
+    next_split(lit->get_z3(*this), 0, lit->get_lit() > 0 ? Z3_L_TRUE : Z3_L_FALSE);
 }

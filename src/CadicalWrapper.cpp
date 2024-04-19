@@ -270,6 +270,7 @@ void CaDiCal_propagator::notify_new_decision_level() {
     soft_propagation_limit.push_back(pending_soft_propagations.size());
     assert(pending_hard_propagations.size() == pending_hard_propagations_idx);
     assert(pending_soft_propagations.size() == soft_propagation_read_idx);
+    base->push();
 }
 
 void CaDiCal_propagator::notify_backtrack(size_t new_level) {
@@ -400,4 +401,8 @@ int CaDiCal_propagator::cb_add_external_clause_lit() {
         return 0;
     }
     return toAdd[hard_propagation_read_idx++];
+}
+
+int CaDiCal_propagator::cb_decide() {
+    return base->decide()->get_lit();
 }

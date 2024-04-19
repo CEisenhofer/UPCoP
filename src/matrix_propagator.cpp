@@ -14,7 +14,7 @@ matrix_propagator::matrix_propagator(cnf<indexed_clause*>& cnf, complex_adt_solv
 
     if (progParams.mode == Core) {
         for (unsigned i = 0; i < matrix.size(); i++) {
-            if (matrix[i]->Ground && progParams.multiplicity[i] > 0) {
+            if (matrix[i]->ground && progParams.multiplicity[i] > 0) {
                 clauseLimitListExpr.push_back(m.mk_true());
                 continue;
             }
@@ -23,7 +23,7 @@ matrix_propagator::matrix_propagator(cnf<indexed_clause*>& cnf, complex_adt_solv
         }
 
         for (int i = 0; i < matrix.size(); i++) {
-            if (matrix[i]->Ground && progParams.multiplicity[i] > 0)
+            if (matrix[i]->ground && progParams.multiplicity[i] > 0)
                 continue;
             assume(clauseLimitListExpr[i]);
         }
@@ -38,7 +38,7 @@ matrix_propagator::~matrix_propagator() {
 
 void matrix_propagator::create_instances() {
     for (unsigned i = 0; i < progParams.multiplicity.size(); i++) {
-        assert(progParams.multiplicity[i] <= 1 || !matrix[i]->Ground);
+        assert(progParams.multiplicity[i] <= 1 || !matrix[i]->ground);
         if (progParams.multiplicity[i] == 0)
             continue;
         get_ground(matrix[i], progParams.multiplicity[i] - 1);
@@ -138,7 +138,7 @@ bool matrix_propagator::next_level_core() {
 
     progParams.priority[maxVar] = 0;
     progParams.multiplicity[maxVar]++;
-    assert(progParams.multiplicity[maxVar] <= 1 || !matrix[maxVar]->Ground);
+    assert(progParams.multiplicity[maxVar] <= 1 || !matrix[maxVar]->ground);
     LogN("Increase clause #" + to_string(maxVar) + " to " + to_string(progParams.multiplicity[maxVar]));
     return false;
 }
@@ -160,10 +160,30 @@ bool matrix_propagator::are_same_atom(const ground_literal& l1, const ground_lit
     if (large_array::is_invalid(unification))
         return false;
     bool res = unification->is_satisfied(*this, l1, l2);
-    assert(res == unificationHints.get(l2.lit->Index, l1.lit->Index)->is_satisfied(*this, l2, l1));
+    assert(res == unificationHints.get(l2.lit->index, l1.lit->index)->is_satisfied(*this, l2, l1));
     return res;
 }
 
+static int cnt = 0;
+void matrix_propagator::push() {
+    //cnt++;
+    //if (cnt % 1000 == 0) {
+    //    unsigned conjectureIdx = -1;
+    //    for (unsigned i = 0; i < chosen.size(); i++) {
+    //        std::cout << chosen[i]->clause->index << "/" << chosen[i]->copyIdx << "  ";
+    //        if (conjectureIdx == -1 && chosen[i]->clause->conjecture) {
+    //            conjectureIdx = i;
+    //        }
+    //    }
+    //    std::cout << std::endl;
+    //    if (conjectureIdx == -1) {
+    //        std::cout << "No conjecture selected?! DL: " << decision_level() << std::endl;
+    //    }
+    //    else {
+    //        std::cout << "Conjecture: " << chosen[conjectureIdx]->clause->index << "/" << chosen[conjectureIdx]->copyIdx << std::endl;
+    //    }
+    //}
+}
 
 void matrix_propagator::check_proof(z3::context& ctx) {
     if (!progParams.checkProof)
@@ -233,9 +253,9 @@ void matrix_propagator::check_proof(z3::context& ctx) {
 clause_instance* matrix_propagator::get_ground(const indexed_clause* clause, unsigned cpy) {
     if (clause == nullptr)
         return nullptr;
-    auto& instances = cachedClauses[clause->Index];
+    auto& instances = cachedClauses[clause->index];
     for (unsigned i = instances.size(); i <= cpy; i++) {
-        literal selector = m.mk_lit(new_observed_var(OPT("select#" + to_string(clause->Index) + "@" + to_string(i))));
+        literal selector = m.mk_lit(new_observed_var(OPT("select#" + to_string(clause->index) + "@" + to_string(i))));
         auto* info = create_clause_instance(clause, i, selector);
         instances.push_back(info);
         allClauses.push_back(info);
@@ -247,17 +267,17 @@ clause_instance* matrix_propagator::get_ground(const indexed_clause* clause, uns
 
 void matrix_propagator::assert_root() {
     assert(std::any_of(matrix.clauses.begin(), matrix.clauses.end(),
-                       [](const indexed_clause* c) { return c->Conjecture; }));
-    vector<literal> root;
+                       [](const indexed_clause* c) { return c->conjecture; }));
+    root.clear();
     for (unsigned i = 0; i < matrix.size(); i++) {
-        if (matrix[i]->Conjecture) {
+        if (matrix[i]->conjecture) {
             root.push_back(get_ground(matrix[i], 0)->selector);
 #ifdef DIMACS
             dimacs << root.back().get_lit() << " ";
 #endif
         }
     }
-    add_assertion(std::move(root));
+    add_assertion(root);
 
 #ifdef DIMACS
     dimacs << "0\n";
@@ -333,7 +353,6 @@ void matrix_propagator::pb_clause_limit() {
 
 void matrix_propagator::fixed(literal_term* e, bool value) {
     try {
-
         if (value && false) {
             for (const auto& [just, c1, c2] : e->connections) {
                 bool val = false;
@@ -398,7 +417,13 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
             return;
         }
 
-        unsigned c = info->clause->Index;
+        if (!selectedConjecture && info->clause->conjecture) {
+            selectedConjecture = true;
+            add_undo([this]() { selectedConjecture = false; });
+        }
+        // assert(decision_level() <= 1 || progParams.mode == Core || selectedConjecture); --for Z3 we would have to call next_split in pop
+
+        unsigned c = info->clause->index;
 
         /*for (unsigned i = info->copy_idx; i > 0; i--) {
             if (cachedClauses[c][i - 1]->value == sat)
@@ -621,7 +646,7 @@ formula_term* matrix_propagator::connect_literal(literal just, clause_instance* 
                 const subterm_hint* unification = cache_unification(lit, *matrix[i]->literals[j]);
                 if (large_array::is_invalid(unification) || lit.lit->polarity == matrix[i]->literals[j]->polarity)
                     continue;
-                if (!cachedClauses[i].empty() && matrix[i]->Ground) {
+                if (!cachedClauses[i].empty() && matrix[i]->ground) {
                     assert(cachedClauses[i].size() == 1);
                     continue;
                 }
@@ -656,6 +681,7 @@ void matrix_propagator::final() {
 
     vector<vector<vector<path_element>>> submatrix_paths;
     LogN("Final (" << finalCnt << ")");
+    std::cout << "Final (" << finalCnt << ")" << std::endl;
 
     if (false) {
         unordered_set<clause_instance*> visited;
@@ -749,7 +775,7 @@ void matrix_propagator::final() {
                 for (int j = i + 1; j < path.size(); j++) {
                     assert(!are_connected(path[i].lit, path[j].lit));
                     vector<formula> unificationConstraint;
-                    const auto* unification = unificationHints.get(path[i].lit.lit->Index, path[j].lit.lit->Index);
+                    const auto* unification = unificationHints.get(path[i].lit.lit->index, path[j].lit.lit->index);
                     assert(unification != nullptr);
                     if (!large_array::is_invalid(unification) && path[i].lit.lit->polarity != path[j].lit.lit->polarity) {
                         unification->get_pos_constraints(*this, path[i].lit, path[j].lit, unificationConstraint);
@@ -908,4 +934,19 @@ void matrix_propagator::find_path_sat(const vector<clause_instance*>& clauses, v
         subsolver.add(0);
 
     } while (foundPaths.size() < MAX_FINAL_PATHS);
+}
+
+literal matrix_propagator::decide() {
+    if (selectedConjecture)
+        return m.mk_false();
+    assert(std::any_of(root.begin(), root.end(), [this](literal v) { return !has_value(v); }));
+    unsigned start = get_random(0, root.size());
+    for (unsigned i = 0; i < root.size(); i++) {
+        unsigned idx = (start + i) % root.size();
+        if (!has_value(root[idx])) {
+            return root[idx];
+        }
+    }
+    assert(false);
+    return m.mk_false();
 }
