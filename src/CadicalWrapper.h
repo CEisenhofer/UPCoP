@@ -18,7 +18,7 @@ class CaDiCal_propagator : public CaDiCaL::ExternalPropagator, public CaDiCaL::T
 
 private:
 
-    decltype(std::chrono::high_resolution_clock::now()) stopTime;
+    const decltype(std::chrono::high_resolution_clock::now()) stopTime;
 
     int var_cnt = 0;
     std::vector<unsigned> undo_stack_limit;
@@ -42,10 +42,11 @@ private:
         return 2 * abs(lit) + (unsigned)(lit < 0) - 2 /* 0 is not a valid literal*/;
     }
 
-protected:
     std::vector<bool> interpreted;
+    unsigned lastClearCnt = 2; /* ignore true and false */
 
 public:
+    unsigned popCnt = 0;
 
     CaDiCaL::Solver* solver = nullptr;
     formula_manager m;
@@ -65,7 +66,7 @@ public:
         }
     }
 
-    unsigned vars() {
+    unsigned vars() const {
         return (unsigned)solver->vars();
     }
 
@@ -115,8 +116,16 @@ public:
         solver->assume(v->get_lit());
     }
 
-    inline void add_assertion(literal v) const {
-        solver->clause(v->get_lit());
+    inline void add_assertion(formula v) const {
+        vector<vector<int>> aux;
+        literal lit = v->get_lits(*base, aux);
+        solver->clause(lit->get_lit());
+        for (vector<int>& clause : aux) {
+            for (int l : clause) {
+                solver->add(l);
+            }
+            solver->add(0);
+        }
     }
 
     inline void add_assertion(const vector<literal>& v) const {
@@ -177,19 +186,16 @@ public:
     }
 
     inline void observe_remove(int var_id) {
-        // solver->remove_observed_var(var_id);
-        // solver->melt(var_id);
+        solver->remove_observed_var(var_id);
     }
 
-protected:
+    void clear_tseitin();
 
     void notify_assignment(const vector<int>& lits) final;
 
     void notify_fixed_assignment(int id) final;
 
-    bool terminate() override {
-        return std::chrono::high_resolution_clock::now() >= stopTime;
-    }
+    bool terminate() override;
 
     void notify_new_decision_level() final;
 

@@ -17,6 +17,11 @@ uint64_t stop_watch(stopwatch_idx idx) {
     return res / 1000;
 }
 
+uint64_t peek_watch(stopwatch_idx idx) {
+    auto now = std::chrono::high_resolution_clock::now();
+    return std::chrono::duration_cast<std::chrono::microseconds>(now - start_time[idx]).count() / 1000;
+}
+
 uint64_t get_total_time(stopwatch_idx idx) {
     return total_time[(unsigned)idx] / 1000;
 }

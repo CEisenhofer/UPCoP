@@ -96,7 +96,6 @@ protected:
 
     ProgParams& progParams;
     const cnf<indexed_clause*>& matrix;
-    vector<literal> root;
 
     std::vector<action> undo_stack;
 
@@ -166,7 +165,7 @@ public:
         return z3Propagator->new_observed_var(name);
     }
 
-    inline int new_var(const std::string& name) {
+    inline int new_tseitin_var(const std::string& name) {
         if (cadicalPropagator != nullptr)
             return cadicalPropagator->new_var(name);
         assert(false);
@@ -181,10 +180,10 @@ public:
         return z3Propagator->new_observed_var();
     }
 
-    int new_var() {
+    int new_tseitin_var() {
         if (cadicalPropagator != nullptr)
             return cadicalPropagator->new_var();
-        throw solving_exception("Z3 does not require generating non-observed variables.");
+        throw solving_exception("Z3 does not require generating explicit tseitin variables.");
     }
 #endif
 
@@ -270,6 +269,7 @@ public:
     virtual void fixed(literal e, bool value) = 0;
     virtual void final() = 0;
     virtual literal decide() = 0;
+    virtual bool terminate() = 0;
 
     inline vector<action>& get_undo() {
         return undo_stack;

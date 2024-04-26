@@ -39,11 +39,11 @@ z3::expr true_term::get_z3(z3_propagator& propagator) {
     return propagator.get_ctx().bool_val(true);
 }
 
-const literal_term* not_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
+const literal not_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
     assert(!t->is_true() && !t->is_false());
 
     if (var_id == 0)
-        var_id = propagator.new_var(OPT("<" + to_string() + ">"));
+        var_id = propagator.new_tseitin_var(OPT("<" + to_string() + ">"));
     else
         return manager.mk_lit(var_id);
     const formula_term* arg = t->get_lits(propagator, aux);
@@ -56,9 +56,9 @@ z3::expr not_term::get_z3(z3_propagator& propagator) {
     return !t->get_z3(propagator);
 }
 
-const literal_term* and_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
+const literal and_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
     if (var_id == 0)
-        var_id = propagator.new_var(OPT("<" + to_string() + ">"));
+        var_id = propagator.new_tseitin_var(OPT("<" + to_string() + ">"));
     else {
         literal lit = manager.mk_lit(var_id);
         // assert(connections.empty());
@@ -99,9 +99,9 @@ z3::expr and_term::get_z3(z3_propagator& propagator) {
     return z3::mk_and(args);
 }
 
-const literal_term* or_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
+const literal or_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
     if (var_id == 0)
-        var_id = propagator.new_var(OPT("<" + to_string() + ">"));
+        var_id = propagator.new_tseitin_var(OPT("<" + to_string() + ">"));
     else {
         literal lit = manager.mk_lit(var_id);
         assert(connections.empty());

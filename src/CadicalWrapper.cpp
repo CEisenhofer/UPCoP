@@ -135,7 +135,7 @@ bool CaDiCal_propagator::hard_propagate(const justification& just, formula prop)
 
 #ifdef PUSH_POP
     std::vector<int> aux2 = std::move(aux.back());
-    undo_stack.emplace_back([this, aux2]() {
+    base->add_undo([this, aux2]() {
         prev_propagations.erase(aux2);
     });
 #endif
@@ -201,6 +201,7 @@ bool CaDiCal_propagator::soft_propagate(const justification& just, literal prop)
 
 CaDiCal_propagator::CaDiCal_propagator(propagator_base* base, unsigned timeLeft) : base(base), m(base), solver(new CaDiCaL::Solver()),
                                                             stopTime(std::chrono::milliseconds(timeLeft) + std::chrono::high_resolution_clock::now()) {
+    are_reasons_forgettable = true;
     solver->set("ilb", 0);
     solver->set("ilbassumptions", 0);
     // solver->set("chrono", 0);
@@ -208,6 +209,7 @@ CaDiCal_propagator::CaDiCal_propagator(propagator_base* base, unsigned timeLeft)
     solver->set("inprocessing", 0);
     solver->set("lucky", 0);
     solver->set("walk", 0);
+    solver->set("forcephase", 1);
     solver->configure("plain");
     solver->connect_terminator(this);
     solver->connect_fixed_listener(this);
@@ -220,6 +222,23 @@ CaDiCal_propagator::CaDiCal_propagator(propagator_base* base, unsigned timeLeft)
 
 CaDiCal_propagator::~CaDiCal_propagator() {
     delete solver;
+}
+
+void CaDiCal_propagator::clear_tseitin() {
+    unsigned elim = 0;
+    for (; lastClearCnt < m.get_tseitin_cnt(); lastClearCnt++) {
+        formula f = m.get_tseitin(lastClearCnt);
+        if (f->get_var_id() == 0)
+            continue;
+        int id = abs(f->get_var_id());
+        if (interpreted[id - 1])
+            continue;
+        string s = f->to_string();
+        solver->remove_observed_var(id);
+        f->detach_var();
+        elim++;
+    }
+    std::cout << "Eliminated " << elim << " tseitin variables" << std::endl;
 }
 
 static unsigned fixedCnt = 0;
@@ -262,6 +281,10 @@ void CaDiCal_propagator::notify_fixed_assignment(int id) {
     assert(interpretation[abs(id) - 1] == undef || interpretation[abs(id) - 1] == id > 0 ? sat : unsat);
 }
 
+bool CaDiCal_propagator::terminate() {
+    return std::chrono::high_resolution_clock::now() >= stopTime || base->terminate();
+}
+
 void CaDiCal_propagator::notify_new_decision_level() {
     assert(hard_propagation_read_idx == 0);
     LogN("Pushed " + to_string(undo_stack_limit.size()));
@@ -274,13 +297,19 @@ void CaDiCal_propagator::notify_new_decision_level() {
 }
 
 void CaDiCal_propagator::notify_backtrack(size_t new_level) {
+    popCnt++;
     if (new_level >= undo_stack_limit.size()) {
         // CaDiCal went crazy - let's ignore
         assert(new_level == 0);
         assert(undo_stack_limit.empty());
         return;
     }
-    assert(hard_propagation_read_idx == 0);
+    //assert(hard_propagation_read_idx == 0);
+    if (new_level == 0) {
+        hard_propagation_read_idx = 0;
+        pending_hard_propagations_idx = 0;
+        pending_hard_propagations.clear();
+    }
     LogN("Pop to " << new_level);
 
     base->clear_conflict();
@@ -334,12 +363,9 @@ bool CaDiCal_propagator::cb_check_found_model(const std::vector<int>& model) {
     return pending_hard_propagations.size() == pending_hard_propagations_idx && !base->is_conflict();
 }
 
-static int invCnt = 0;
-
 int CaDiCal_propagator::cb_propagate() {
     if (base->is_conflict())
         return 0;
-    invCnt++;
     if (soft_propagation_read_idx >= pending_soft_propagations.size())
         return 0;
     auto& [just, prop] = pending_soft_propagations[soft_propagation_read_idx++];
@@ -350,7 +376,7 @@ int CaDiCal_propagator::cb_propagate() {
     assert(soft_justifications[idx].empty() || interpretation[abs(ret) - 1] == (ret > 0 ? sat : unsat));
     soft_justifications[idx] = just;
 #ifdef PUSH_POP
-    undo_stack.emplace_back([this, idx](){ soft_justifications[idx].clear(); });
+    base->add_undo([this, idx](){ soft_justifications[idx].clear(); });
 #endif
     LogN("Enforced " << ret);
     return ret;
@@ -379,7 +405,6 @@ int CaDiCal_propagator::cb_add_reason_clause_lit(int propagated_lit) {
 bool CaDiCal_propagator::cb_has_external_clause(bool& is_forgettable) {
 #ifdef PUSH_POP
     is_forgettable = true;
-    are_reasons_forgettable = true;
 #endif
     return pending_hard_propagations_idx < pending_hard_propagations.size();
 }

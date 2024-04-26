@@ -54,15 +54,23 @@ class formula_manager {
     true_term* trueTerm;
     false_term* falseTerm;
 
-    std::vector<formula_term*> id_to_formula;
-    std::vector<literal_term*> cadical_to_formula;
-    std::vector<literal_term*> neg_cadical_to_formula;
+    std::vector<formula> id_to_formula;
+    std::vector<literal> cadical_to_formula;
+    std::vector<literal> neg_cadical_to_formula;
 
-    std::unordered_map<formula_term*, formula_term*> not_cache;
-    std::unordered_map<std::vector<formula_term*>, and_term*> and_cache;
-    std::unordered_map<std::vector<formula_term*>, or_term*> or_cache;
+    std::unordered_map<formula, formula> not_cache;
+    std::unordered_map<std::vector<formula>, and_term*> and_cache;
+    std::unordered_map<std::vector<formula>, or_term*> or_cache;
 
 public:
+
+    unsigned get_tseitin_cnt() const {
+        return id_to_formula.size();
+    }
+
+    formula get_tseitin(unsigned idx) const {
+        return id_to_formula[idx];
+    }
 
     true_term* mk_true() const;
 
@@ -102,10 +110,6 @@ class formula_term {
     tri_state final_interpretation = undef;
 
 protected:
-
-#ifdef PUSH_POP
-    bool active = false;
-#endif
 
     formula_manager& manager;
     int var_id = 0;
@@ -160,15 +164,21 @@ public:
     // first:  0 -> just create a new variable and return it
     // first:  1 -> inline the variable positively
     // first: -1 -> inline the variable negatively
-    virtual const literal_term* get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) = 0;
+    virtual const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) = 0;
 
     virtual z3::expr get_z3(z3_propagator& propagator) = 0;
 
     virtual formula_term* negate() = 0;
+
+    void detach_var() {
+        var_id = 0;
+    }
 };
 
 class literal_term : public formula_term {
+#ifndef NDEBUG
     const std::string name;
+#endif
 
 public:
 
@@ -197,10 +207,14 @@ public:
     }
 
     std::string to_string() const override {
+#ifndef NDEBUG
         return name;
+#else
+        return "";
+#endif
     }
 
-    const literal_term* get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override {
+    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override {
         return this;
     }
 
@@ -216,7 +230,7 @@ struct false_term : public literal_term {
 
     std::string to_string() const final { return "false"; }
 
-    const literal_term* get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) final {
+    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) final {
         return nullptr;
     }
 
@@ -232,7 +246,7 @@ struct true_term : public literal_term {
 
     std::string to_string() const final { return "true"; }
 
-    const literal_term* get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) final {
+    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) final {
         return nullptr;
     }
 
@@ -249,13 +263,21 @@ class not_term : public formula_term {
 
 public:
 
-    explicit not_term(formula_manager& m, formula_term* t) : formula_term(m), t(t), name("!" + t->to_string()) {}
+    explicit not_term(formula_manager& m, formula_term* t) : formula_term(m), t(t)
+#ifndef NDEBUG
+            , name("!" + t->to_string())
+#endif
+    {}
 
     std::string to_string() const final {
+#ifndef NDEBUG
         return name;
+#else
+        return "";
+#endif
     }
 
-    const literal_term* get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override;
+    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override;
 
     z3::expr get_z3(z3_propagator& propagator) final;
 
@@ -293,15 +315,22 @@ class and_term : public complex_term {
 
 public:
     explicit and_term(formula_manager& m, std::vector<formula_term*> args, bool positive) :
-            complex_term(m, std::move(args), positive),
-            name(string_join(this->args, " && ")) {
+            complex_term(m, std::move(args), positive)
+#ifndef NDEBUG
+            , name(string_join(this->args, " && "))
+#endif
+    {
     }
 
     std::string to_string() const final {
+#ifndef NDEBUG
         return name;
+#else
+        return "";
+#endif
     }
 
-    const literal_term* get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override;
+    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override;
 
     z3::expr get_z3(z3_propagator& propagator) final;
 
@@ -316,18 +345,29 @@ public:
 };
 
 class or_term : public complex_term {
+#ifndef NDEBUG
     const std::string name;
+#endif
 
 public:
     explicit or_term(formula_manager& m, std::vector<formula_term*> args, bool positive) :
-            complex_term(m, std::move(args), positive), name(string_join(this->args, " || ")) {
+            complex_term(m, std::move(args), positive)
+#ifndef NDEBUG
+            , name(string_join(this->args, " || "))
+#endif
+    {
+
     }
 
     std::string to_string() const final {
+#ifndef NDEBUG
         return name;
+#else
+        return "";
+#endif
     }
 
-    const literal_term* get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override;
+    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override;
 
     z3::expr get_z3(z3_propagator& propagator) final;
 

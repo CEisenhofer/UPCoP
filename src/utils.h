@@ -1,6 +1,6 @@
 #pragma once
 
-// #define PUSH_POP
+#define PUSH_POP
 
 #include <algorithm>
 #include <optional>
@@ -82,6 +82,7 @@ enum stopwatch_idx : unsigned char {
 
 void start_watch(stopwatch_idx);
 uint64_t stop_watch(stopwatch_idx);
+uint64_t peek_watch(stopwatch_idx);
 uint64_t get_total_time(stopwatch_idx);
 
 template<typename T, typename S, typename hash, typename eq>

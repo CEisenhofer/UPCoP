@@ -292,7 +292,12 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         tri_state res;
         try {
             propagator->assert_root();
-            res = propagator->check();
+            do {
+                res = propagator->check();
+                if (res != undef || peek_watch(level_time) >= timeLeft)
+                    break;
+                propagator->clear_tseitin();
+            } while (true);
         }
         catch (std::exception& ex) {
             cout << "Error: " << ex.what() << endl;
@@ -305,11 +310,6 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
         out << dimacs;
         out.close();
         std::cout << "Wrote dimacs output to output.dimacs" << std::endl;
-#endif
-#ifndef NDEBUG
-        if (res == undef && propagator->is_smt()) {
-            LogN("Reason unknow: " << propagator->get_z3_propagator()->get_solver().reason_unknown());
-        }
 #endif
 
         if (res != sat) {

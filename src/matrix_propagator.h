@@ -95,6 +95,9 @@ class matrix_propagator : public propagator_base {
     vector<clause_instance*> chosen;
     vector<clause_instance*> not_chosen;
 
+    vector<vector<formula>> selectionExprs;
+    unsigned selectionIdx = 0;
+
     unordered_map<literal, clause_instance*> exprToInfo;
     unordered_map<literal, int> clauseLimitMap;
     vector<literal> clauseLimitListExpr;
@@ -102,7 +105,6 @@ class matrix_propagator : public propagator_base {
 
     int finalCnt = 0;
 
-    bool selectedConjecture = false;
     bool hasLimFalse = false;
     bool pbPropagated = false;
 
@@ -146,7 +148,9 @@ public:
         return l1.lit->polarity != l2.lit->polarity && are_same_atom(l1, l2);
     }
 
-    void push() override;
+    void clear_tseitin();
+
+    void push() final;
 
     void check_proof(z3::context& ctx);
 
@@ -156,7 +160,7 @@ public:
 
     void pb_clause_limit();
 
-    void fixed(literal e, bool value);
+    void fixed(literal e, bool value) final;
 
     bool delayed_rp(clause_instance* info);
 
@@ -175,9 +179,11 @@ public:
 
     formula connect_literal(literal just, clause_instance* info, const ground_literal& lit);
 
-    void final() override;
+    void final() final;
 
     literal decide() final;
+
+    bool terminate() final;
 
     void find_path(int clauseIdx, const vector<clause_instance*>& clauses, vector<path_element>& path, vector<vector<path_element>>& foundPaths, unsigned& steps);
 

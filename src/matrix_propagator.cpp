@@ -164,7 +164,14 @@ bool matrix_propagator::are_same_atom(const ground_literal& l1, const ground_lit
     return res;
 }
 
+void matrix_propagator::clear_tseitin() {
+    assert(!is_smt());
+    cadicalPropagator->clear_tseitin();
+}
+
 static int cnt = 0;
+static int pb_count = 0;
+
 void matrix_propagator::push() {
     //cnt++;
     //if (cnt % 1000 == 0) {
@@ -256,6 +263,11 @@ clause_instance* matrix_propagator::get_ground(const indexed_clause* clause, uns
     auto& instances = cachedClauses[clause->index];
     for (unsigned i = instances.size(); i <= cpy; i++) {
         literal selector = m.mk_lit(new_observed_var(OPT("select#" + to_string(clause->index) + "@" + to_string(i))));
+
+        if (cadicalPropagator != nullptr) {
+            cadicalPropagator->solver->phase(-selector->get_lit()); // better not chose anything we don't need necessarily
+        }
+
         auto* info = create_clause_instance(clause, i, selector);
         instances.push_back(info);
         allClauses.push_back(info);
@@ -268,16 +280,21 @@ clause_instance* matrix_propagator::get_ground(const indexed_clause* clause, uns
 void matrix_propagator::assert_root() {
     assert(std::any_of(matrix.clauses.begin(), matrix.clauses.end(),
                        [](const indexed_clause* c) { return c->conjecture; }));
-    root.clear();
+    vector<formula> root;
+    vector<literal> rootLits;
     for (unsigned i = 0; i < matrix.size(); i++) {
         if (matrix[i]->conjecture) {
-            root.push_back(get_ground(matrix[i], 0)->selector);
+            literal l = get_ground(matrix[i], 0)->selector;
+            root.push_back(l);
+            rootLits.push_back(l);
 #ifdef DIMACS
             dimacs << root.back().get_lit() << " ";
 #endif
         }
     }
-    add_assertion(root);
+    add_assertion(rootLits);
+    if (root.size() > 1)
+        selectionExprs.push_back(std::move(root));
 
 #ifdef DIMACS
     dimacs << "0\n";
@@ -326,6 +343,7 @@ void matrix_propagator::pb_clause_limit() {
         for (auto* p : prop) {
             if (!soft_propagate(just, p))
                 return;
+            pb_count++;
         }
     }
     else if (lowerLimit) {
@@ -346,6 +364,7 @@ void matrix_propagator::pb_clause_limit() {
         for (auto* p : prop) {
             if (!soft_propagate(just, p))
                 return;
+            pb_count++;
         }
     }
     stop_watch(pb_time);
@@ -417,10 +436,9 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
             return;
         }
 
-        if (!selectedConjecture && info->clause->conjecture) {
-            selectedConjecture = true;
-            add_undo([this]() { selectedConjecture = false; });
-        }
+
+        // std::cout << "Fixed: " << info->selector->to_string() << std::endl;
+
         // assert(decision_level() <= 1 || progParams.mode == Core || selectedConjecture); --for Z3 we would have to call next_split in pop
 
         unsigned c = info->clause->index;
@@ -510,7 +528,6 @@ void matrix_propagator::fixed(literal_term* e, bool value) {
             info->propagated = true;
         }
 #endif
-
         pb_clause_limit();
     }
     catch (z3::exception& ex) {
@@ -538,7 +555,8 @@ bool matrix_propagator::delayed_rp(clause_instance* info) {
                     continue;
                 if (eq.RHS->origin->value == undef) {
                     eq.RHS->origin->delayedRelevantTrue.push_back(eq);
-                    add_undo([eq]() { eq.RHS->origin->delayedRelevantTrue.pop_back(); });
+                    auto* origin = eq.RHS->origin;
+                    add_undo([origin]() { origin->delayedRelevantTrue.pop_back(); });
                     continue;
                 }
             }
@@ -560,8 +578,10 @@ bool matrix_propagator::delayed_rp(clause_instance* info) {
                 if (eq.RHS->origin->value == unsat)
                     continue;
                 if (eq.RHS->origin->value == undef) {
+                    assert(eq.RHS->origin != info);
                     eq.RHS->origin->delayedRelevantFalse.push_back(eq);
-                    add_undo([eq]() { eq.RHS->origin->delayedRelevantFalse.pop_back(); });
+                    auto* origin = eq.RHS->origin;
+                    add_undo([origin]() { origin->delayedRelevantFalse.pop_back(); });
                     continue;
                 }
             }
@@ -605,7 +625,6 @@ bool matrix_propagator::delayed_rp(clause_instance* info) {
 }
 
 formula_term* matrix_propagator::connect_literal(literal just, clause_instance* info, const ground_literal& lit) {
-    // TODO: Only propagate the 0th copy if the clause is ground
     vector<formula> exprs;
     for (auto& cachedClause : cachedClauses) {
         assert(progParams.mode == Core || !cachedClause.empty());
@@ -624,13 +643,19 @@ formula_term* matrix_propagator::connect_literal(literal just, clause_instance* 
                 auto* clause = cachedClause[k];
                 if (clause == info)
                     continue; // We don't want to connect to itself...
-                vector<formula> constraints = { cachedClause[k]->selector };
+                literal selector = cachedClause[k]->selector;
+                vector<formula> constraints = { selector };
+                if (cadicalPropagator != nullptr) {
+                    cadicalPropagator->solver->phase(-selector->get_lit());
+                }
+
                 unification->get_pos_constraints(*this, lit, cachedClause[k]->literals[j], constraints);
                 formula conj = m.mk_and(constraints);
-                [[unlikely]]
-                if (conj->is_true())
+                if (conj->is_true()) [[unlikely]]
                     return m.mk_true();
-                formula_term::connection_tseitin connectionTseitin;
+                if (conj->is_false()) [[unlikely]]
+                    continue;
+                formula_term::connection_tseitin connectionTseitin {};
                 connectionTseitin.sideCondition = just;
                 connectionTseitin.c1 = info;
                 connectionTseitin.c2 = cachedClause[k];
@@ -638,6 +663,11 @@ formula_term* matrix_propagator::connect_literal(literal just, clause_instance* 
                 exprs.push_back(conj);
             }
         }
+    }
+
+    if (exprs.size() > 1) {
+        selectionExprs.push_back(exprs);
+        add_undo([this]() { selectionExprs.pop_back(); });
     }
 
     if (progParams.mode == Core) {
@@ -937,16 +967,46 @@ void matrix_propagator::find_path_sat(const vector<clause_instance*>& clauses, v
 }
 
 literal matrix_propagator::decide() {
-    if (selectedConjecture)
+    if (selectionIdx == selectionExprs.size())
         return m.mk_false();
-    assert(std::any_of(root.begin(), root.end(), [this](literal v) { return !has_value(v); }));
-    unsigned start = get_random(0, root.size());
-    for (unsigned i = 0; i < root.size(); i++) {
-        unsigned idx = (start + i) % root.size();
-        if (!has_value(root[idx])) {
-            return root[idx];
+    unsigned prev = selectionIdx;
+    for (; selectionIdx < selectionExprs.size(); selectionIdx++) {
+        bool satisfied = false;
+        literal unassigned = nullptr;
+        const unsigned sz = selectionExprs[selectionIdx].size();
+        unsigned s = get_random(0, sz);
+        for (unsigned i = 0; i < sz; i++) {
+            auto& f = selectionExprs[selectionIdx][(i + s) % sz];
+            vector<vector<int>> ignored;
+            bool val = false;
+            literal lit = f->get_lits(*this, ignored);
+            assert(ignored.empty());
+            if (!get_value(lit, val)) {
+                unassigned = lit;
+            }
+            else if (val) {
+                satisfied = true;
+                break;
+            }
+        }
+        if (!satisfied) {
+            assert(unassigned != nullptr);
+            add_undo([this, prev]() { selectionIdx = prev; });
+            return unassigned;
         }
     }
-    assert(false);
+    add_undo([this, prev]() { selectionIdx = prev; });
     return m.mk_false();
+}
+
+bool matrix_propagator::terminate() {
+    if (cadicalPropagator->popCnt >= 1) {
+        std::cout << "Manual restart" << std::endl;
+        cadicalPropagator->popCnt = 0;
+        for (auto* c : chosen) {
+            cadicalPropagator->solver->phase(-c->selector->get_lit());
+        }
+        return true;
+    }
+    return false;
 }
