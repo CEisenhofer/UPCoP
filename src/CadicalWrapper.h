@@ -35,9 +35,6 @@ private:
 
     std::vector<tri_state> interpretation;
 
-    // for persistent propagation
-    std::unordered_set<std::vector<int>> prev_propagations;
-
     unsigned literal_to_idx(int lit) const {
         return 2 * abs(lit) + (unsigned)(lit < 0) - 2 /* 0 is not a valid literal*/;
     }
@@ -93,6 +90,8 @@ public:
 
     bool soft_propagate(const justification& just, literal prop);
 
+    void add_clause(vector<int> clause);
+
     CaDiCal_propagator(propagator_base* base, unsigned timeLeft);
     ~CaDiCal_propagator();
 
@@ -116,16 +115,8 @@ public:
         solver->assume(v->get_lit());
     }
 
-    inline void add_assertion(formula v) const {
-        vector<vector<int>> aux;
-        literal lit = v->get_lits(*base, aux);
-        solver->clause(lit->get_lit());
-        for (vector<int>& clause : aux) {
-            for (int l : clause) {
-                solver->add(l);
-            }
-            solver->add(0);
-        }
+    inline void add_assertion(literal v) const {
+        solver->clause(v->get_lit());
     }
 
     inline void add_assertion(const vector<literal>& v) const {

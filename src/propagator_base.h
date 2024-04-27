@@ -251,6 +251,12 @@ public:
         return z3Propagator->propagate(just, prop);
     }
 
+    inline void add_clause(vector<int> clause) const {
+        if (cadicalPropagator != nullptr)
+            return cadicalPropagator->add_clause(std::move(clause));
+        assert(false);
+    }
+
     const subterm_hint* cache_unification(const ground_literal& l1, const indexed_literal& l2);
 
     inline const subterm_hint* cache_unification(const ground_literal& l1, const ground_literal& l2) {

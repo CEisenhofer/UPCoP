@@ -977,10 +977,8 @@ literal matrix_propagator::decide() {
         unsigned s = get_random(0, sz);
         for (unsigned i = 0; i < sz; i++) {
             auto& f = selectionExprs[selectionIdx][(i + s) % sz];
-            vector<vector<int>> ignored;
             bool val = false;
-            literal lit = f->get_lits(*this, ignored);
-            assert(ignored.empty());
+            literal lit = f->get_lits(*this);
             if (!get_value(lit, val)) {
                 unassigned = lit;
             }
@@ -1000,7 +998,7 @@ literal matrix_propagator::decide() {
 }
 
 bool matrix_propagator::terminate() {
-    if (cadicalPropagator->popCnt >= 1) {
+    if (cadicalPropagator->popCnt >= 2) {
         std::cout << "Manual restart" << std::endl;
         cadicalPropagator->popCnt = 0;
         for (auto* c : chosen) {

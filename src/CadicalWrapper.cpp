@@ -81,7 +81,7 @@ void CaDiCal_propagator::propagate_conflict(const justification& just) {
     dimacs << "0\n";
 #endif
 
-    pending_hard_propagations.emplace_back(std::move(aux));
+    add_clause(std::move(aux));
 }
 
 bool CaDiCal_propagator::hard_propagate(const justification& just, formula prop) {
@@ -105,41 +105,24 @@ bool CaDiCal_propagator::hard_propagate(const justification& just, formula prop)
     LogN(prop->to_string());
 #endif
 
-    std::vector<std::vector<int>> aux;
-    const literal_term* c = prop->get_lits(*base, aux);
-    aux.emplace_back();
-    aux.back().reserve(lits.size());
-    aux.back().push_back(c->get_lit());
+    std::vector<int> aux;
+    const literal_term* c = prop->get_lits(*base);
+    aux.reserve(lits.size());
+    aux.push_back(c->get_lit());
     for (literal k : lits) {
         if (k->is_true())
             continue;
-        aux.back().push_back(-k->get_lit());
+        aux.push_back(-k->get_lit());
     }
     // aux.back().second = prop; -- not required; the get_lits should do that
 
-    if (contains(prev_propagations, aux.back())) {
-        assert(aux.size() == 1);
-        // We already propagated this -> skip
-        return true;
-    }
-    for (auto& k: aux) {
 #ifdef DIMACS
-        for (int l: k) {
-            dimacs << l << " ";
-        }
-        dimacs << "0\n";
-#endif
-        pending_hard_propagations.emplace_back(std::move(k));
+    for (int l: k) {
+        dimacs << l << " ";
     }
-    prev_propagations.insert(aux.back());
-
-#ifdef PUSH_POP
-    std::vector<int> aux2 = std::move(aux.back());
-    base->add_undo([this, aux2]() {
-        prev_propagations.erase(aux2);
-    });
+    dimacs << "0\n";
 #endif
-    // std::cout << "Propagation cnt: " << pending_hard_propagations.size() << " current idx: " << pending_hard_propagations_idx << std::endl;
+    add_clause(std::move(aux));
     return true;
 }
 
@@ -199,6 +182,10 @@ bool CaDiCal_propagator::soft_propagate(const justification& just, literal prop)
     return true;
 }
 
+void CaDiCal_propagator::add_clause(vector<int> clause) {
+    pending_hard_propagations.emplace_back(std::move(clause));
+}
+
 CaDiCal_propagator::CaDiCal_propagator(propagator_base* base, unsigned timeLeft) : base(base), m(base), solver(new CaDiCaL::Solver()),
                                                             stopTime(std::chrono::milliseconds(timeLeft) + std::chrono::high_resolution_clock::now()) {
     are_reasons_forgettable = true;
@@ -221,6 +208,8 @@ CaDiCal_propagator::CaDiCal_propagator(propagator_base* base, unsigned timeLeft)
 }
 
 CaDiCal_propagator::~CaDiCal_propagator() {
+    solver->reset_constraint();
+    solver->reset_observed_vars();
     delete solver;
 }
 

@@ -39,18 +39,16 @@ z3::expr true_term::get_z3(z3_propagator& propagator) {
     return propagator.get_ctx().bool_val(true);
 }
 
-const literal not_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
+const literal not_term::get_lits(propagator_base& propagator) {
     assert(!t->is_true() && !t->is_false());
 
     if (var_id == 0)
-        var_id = propagator.decision_level() == 0
-                ? propagator.new_observed_var(OPT("<" + to_string() + ">"))
-                : propagator.new_tseitin_var(OPT("<" + to_string() + ">"));
+        var_id = propagator.new_tseitin_var(OPT("<" + to_string() + ">"));
     else
         return manager.mk_lit(var_id);
-    const formula_term* arg = t->get_lits(propagator, aux);
-    aux.emplace_back(std::vector<int>({-var_id, -arg->get_var_id()}));
-    aux.emplace_back(std::vector<int>({var_id, arg->get_var_id()}));
+    const formula_term* arg = t->get_lits(propagator);
+    propagator.add_clause(std::vector<int>({-var_id, -arg->get_var_id()}));
+    propagator.add_clause(std::vector<int>({var_id, arg->get_var_id()}));
     return manager.mk_lit(var_id);
 }
 
@@ -58,11 +56,9 @@ z3::expr not_term::get_z3(z3_propagator& propagator) {
     return !t->get_z3(propagator);
 }
 
-const literal and_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
+const literal and_term::get_lits(propagator_base& propagator) {
     if (var_id == 0)
-        var_id =  propagator.decision_level() == 0
-                  ? propagator.new_observed_var(OPT("<" + to_string() + ">"))
-                  : propagator.new_tseitin_var(OPT("<" + to_string() + ">"));
+        var_id =  propagator.new_tseitin_var(OPT("<" + to_string() + ">"));
     else {
         literal lit = manager.mk_lit(var_id);
         // assert(connections.empty());
@@ -74,11 +70,11 @@ const literal and_term::get_lits(propagator_base& propagator, std::vector<std::v
     std::vector<int> argLits;
     argLits.reserve(args.size());
     for (const auto& arg: args) {
-        const auto* v = arg->get_lits(propagator, aux);
+        const auto* v = arg->get_lits(propagator);
         argLits.push_back(v->get_lit());
     }
     for (int arg: argLits) {
-        aux.emplace_back(std::vector<int>({-var_id, arg}));
+        propagator.add_clause(std::vector<int>({-var_id, arg}));
     }
     if (!positive) {
         std::vector<int> prop;
@@ -87,7 +83,7 @@ const literal and_term::get_lits(propagator_base& propagator, std::vector<std::v
         for (int arg: argLits) {
             prop.push_back(-arg);
         }
-        aux.emplace_back(std::move(prop));
+        propagator.add_clause(std::move(prop));
     }
     literal lit = manager.mk_lit(var_id);
     add_range(lit->connections, connections);
@@ -103,11 +99,9 @@ z3::expr and_term::get_z3(z3_propagator& propagator) {
     return z3::mk_and(args);
 }
 
-const literal or_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
+const literal or_term::get_lits(propagator_base& propagator) {
     if (var_id == 0)
-        var_id =  propagator.decision_level() == 0
-                  ? propagator.new_observed_var(OPT("<" + to_string() + ">"))
-                  : propagator.new_tseitin_var(OPT("<" + to_string() + ">"));
+        var_id =  propagator.new_tseitin_var(OPT("<" + to_string() + ">"));
     else {
         literal lit = manager.mk_lit(var_id);
         assert(connections.empty());
@@ -119,12 +113,12 @@ const literal or_term::get_lits(propagator_base& propagator, std::vector<std::ve
     std::vector<int> argLits;
     argLits.reserve(args.size());
     for (const auto& arg: args) {
-        const auto* v = arg->get_lits(propagator, aux);
+        const auto* v = arg->get_lits(propagator);
         argLits.push_back(v->get_lit());
     }
     if (!positive) {
         for (int arg: argLits) {
-            aux.emplace_back(std::vector<int>({-arg, (signed) var_id}));
+            propagator.add_clause(std::vector<int>({-arg, (signed) var_id}));
         }
     }
     std::vector<int> prop;
@@ -133,7 +127,7 @@ const literal or_term::get_lits(propagator_base& propagator, std::vector<std::ve
     for (int arg: argLits) {
         prop.push_back(arg);
     }
-    aux.emplace_back(std::move(prop));
+    propagator.add_clause(std::move(prop));
     literal lit = manager.mk_lit(var_id);
     add_range(lit->connections, connections);
     connections.clear();

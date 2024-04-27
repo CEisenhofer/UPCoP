@@ -164,7 +164,7 @@ public:
     // first:  0 -> just create a new variable and return it
     // first:  1 -> inline the variable positively
     // first: -1 -> inline the variable negatively
-    virtual const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) = 0;
+    virtual const literal get_lits(propagator_base& propagator) = 0;
 
     virtual z3::expr get_z3(z3_propagator& propagator) = 0;
 
@@ -214,7 +214,7 @@ public:
 #endif
     }
 
-    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override {
+    const literal get_lits(propagator_base& propagator) override {
         return this;
     }
 
@@ -230,7 +230,7 @@ struct false_term : public literal_term {
 
     std::string to_string() const final { return "false"; }
 
-    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) final {
+    const literal get_lits(propagator_base& propagator) final {
         return nullptr;
     }
 
@@ -246,7 +246,7 @@ struct true_term : public literal_term {
 
     std::string to_string() const final { return "true"; }
 
-    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) final {
+    const literal get_lits(propagator_base& propagator) final {
         return nullptr;
     }
 
@@ -277,7 +277,7 @@ public:
 #endif
     }
 
-    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override;
+    const literal get_lits(propagator_base& propagator) override;
 
     z3::expr get_z3(z3_propagator& propagator) final;
 
@@ -330,7 +330,7 @@ public:
 #endif
     }
 
-    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override;
+    const literal get_lits(propagator_base& propagator) override;
 
     z3::expr get_z3(z3_propagator& propagator) final;
 
@@ -367,7 +367,7 @@ public:
 #endif
     }
 
-    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override;
+    const literal get_lits(propagator_base& propagator) override;
 
     z3::expr get_z3(z3_propagator& propagator) final;
 
