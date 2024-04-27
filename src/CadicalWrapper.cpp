@@ -276,8 +276,9 @@ void CaDiCal_propagator::notify_fixed_assignment(int id) {
     }
 #endif
     literal l = m.mk_lit(id);
+    literal n = m.mk_lit(-id);
     l->fix(true);
-    l->negate()->fix(false);
+    n->fix(false);
     assert(interpretation[abs(id) - 1] == undef || interpretation[abs(id) - 1] == id > 0 ? sat : unsat);
 }
 
@@ -305,11 +306,6 @@ void CaDiCal_propagator::notify_backtrack(size_t new_level) {
         return;
     }
     //assert(hard_propagation_read_idx == 0);
-    if (new_level == 0) {
-        hard_propagation_read_idx = 0;
-        pending_hard_propagations_idx = 0;
-        pending_hard_propagations.clear();
-    }
     LogN("Pop to " << new_level);
 
     base->clear_conflict();

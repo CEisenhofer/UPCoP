@@ -43,7 +43,9 @@ const literal not_term::get_lits(propagator_base& propagator, std::vector<std::v
     assert(!t->is_true() && !t->is_false());
 
     if (var_id == 0)
-        var_id = propagator.new_tseitin_var(OPT("<" + to_string() + ">"));
+        var_id = propagator.decision_level() == 0
+                ? propagator.new_observed_var(OPT("<" + to_string() + ">"))
+                : propagator.new_tseitin_var(OPT("<" + to_string() + ">"));
     else
         return manager.mk_lit(var_id);
     const formula_term* arg = t->get_lits(propagator, aux);
@@ -58,7 +60,9 @@ z3::expr not_term::get_z3(z3_propagator& propagator) {
 
 const literal and_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
     if (var_id == 0)
-        var_id = propagator.new_tseitin_var(OPT("<" + to_string() + ">"));
+        var_id =  propagator.decision_level() == 0
+                  ? propagator.new_observed_var(OPT("<" + to_string() + ">"))
+                  : propagator.new_tseitin_var(OPT("<" + to_string() + ">"));
     else {
         literal lit = manager.mk_lit(var_id);
         // assert(connections.empty());
@@ -101,7 +105,9 @@ z3::expr and_term::get_z3(z3_propagator& propagator) {
 
 const literal or_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
     if (var_id == 0)
-        var_id = propagator.new_tseitin_var(OPT("<" + to_string() + ">"));
+        var_id =  propagator.decision_level() == 0
+                  ? propagator.new_observed_var(OPT("<" + to_string() + ">"))
+                  : propagator.new_tseitin_var(OPT("<" + to_string() + ">"));
     else {
         literal lit = manager.mk_lit(var_id);
         assert(connections.empty());
