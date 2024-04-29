@@ -278,6 +278,14 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
     if (progParams.checkProof)
         adtSolver->make_z3_adt(context);
 
+    bool ground = true;
+    for (unsigned i = 0; i < cnf.size(); i++) {
+        if (!cnf[i]->ground) {
+            ground = false;
+            break;
+        }
+    }
+
     int64_t timeLeft = progParams.timeout == 0 ? INT_MAX : progParams.timeout;
     auto* propagator = new matrix_propagator(cnf, *adtSolver, progParams, literalCnt, (unsigned)timeLeft);
 
@@ -328,12 +336,15 @@ tri_state solve(const string& path, ProgParams& progParams, bool silent) {
                 deleteCNF(cnf);
                 return undef;
             }
-            if (timeLeft < 1000 * 60 * 60 * 24)
+            if (ground && id >= cnf.size()) {
+                if (!silent)
+                    cout << "SAT because of ground exhaustion" << endl;
+                deleteCNF(cnf);
+                delete propagator;
+                return sat;
+            }
+            if (timeLeft < (unsigned)(1000 * 60 * 60 * 24))
                 cout << "Time left: " << timeLeft << "ms" << endl;
-
-            int* arr = new int[100000];
-            delete[] arr;
-            new int[100000];
 
             if (propagator->next_level()) {
                 if (!silent)

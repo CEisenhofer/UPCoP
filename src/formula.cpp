@@ -39,7 +39,7 @@ z3::expr true_term::get_z3(z3_propagator& propagator) {
     return propagator.get_ctx().bool_val(true);
 }
 
-const literal_term* not_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
+const literal not_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
     assert(!t->is_true() && !t->is_false());
 
     if (var_id == 0)
@@ -56,7 +56,7 @@ z3::expr not_term::get_z3(z3_propagator& propagator) {
     return !t->get_z3(propagator);
 }
 
-const literal_term* and_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
+const literal and_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
     if (var_id == 0)
         var_id = propagator.new_var(OPT("<" + to_string() + ">"));
     else {
@@ -99,7 +99,7 @@ z3::expr and_term::get_z3(z3_propagator& propagator) {
     return z3::mk_and(args);
 }
 
-const literal_term* or_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
+const literal or_term::get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) {
     if (var_id == 0)
         var_id = propagator.new_var(OPT("<" + to_string() + ">"));
     else {
@@ -160,13 +160,13 @@ inline const T& getX(std::vector<T>& vec, unsigned idx) {
     return vec[idx];
 }
 
-literal_term* formula_manager::mk_lit(unsigned v, bool neg) {
+literal formula_manager::mk_lit(unsigned v, bool neg) {
     assert(v != 0);
     /*const auto interpr = propagator->final_interpretation[v - 1];
     if (interpr != undef) {
-        return (neg ? unsat : sat) == interpr ? (literal_term*)mk_true() : (literal_term*)mk_false();
+        return (neg ? unsat : sat) == interpr ? (literal)mk_true() : (literal)mk_false();
     }*/
-    literal_term* ret;
+    literal ret;
     if (neg) {
         ret = getX(neg_cadical_to_formula, v);
         if (ret != nullptr)
@@ -179,12 +179,12 @@ literal_term* formula_manager::mk_lit(unsigned v, bool neg) {
     return cadical_to_formula[v] = new literal_term(*this, v, neg);
 }
 
-literal_term* formula_manager::mk_lit(int v) {
+literal formula_manager::mk_lit(int v) {
     assert(v != 0);
     return mk_lit(abs(v), v < 0);
 }
 
-literal_term* formula_manager::mk_not(literal_term* c) {
+literal formula_manager::mk_not(literal c) {
     if (c->is_false())
         return mk_true();
     if (c->is_true())
@@ -194,7 +194,7 @@ literal_term* formula_manager::mk_not(literal_term* c) {
 
 formula_term* formula_manager::mk_not(formula_term* c) {
     if (c->is_literal())
-        return mk_not((literal_term*)c);
+        return mk_not((literal)c);
     auto it = not_cache.find(c);
     if (it != not_cache.end())
         return it->second;

@@ -135,7 +135,7 @@ bool CaDiCal_propagator::hard_propagate(const justification& just, formula prop)
 
 #ifdef PUSH_POP
     std::vector<int> aux2 = std::move(aux.back());
-    undo_stack.emplace_back([this, aux2]() {
+    base->add_undo([this, aux2]() {
         prev_propagations.erase(aux2);
     });
 #endif
@@ -350,7 +350,7 @@ int CaDiCal_propagator::cb_propagate() {
     assert(soft_justifications[idx].empty() || interpretation[abs(ret) - 1] == (ret > 0 ? sat : unsat));
     soft_justifications[idx] = just;
 #ifdef PUSH_POP
-    undo_stack.emplace_back([this, idx](){ soft_justifications[idx].clear(); });
+    base->add_undo([this, idx](){ soft_justifications[idx].clear(); });
 #endif
     LogN("Enforced " << ret);
     return ret;

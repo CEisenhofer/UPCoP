@@ -96,7 +96,6 @@ protected:
 
     ProgParams& progParams;
     const cnf<indexed_clause*>& matrix;
-    vector<literal> root;
 
     std::vector<action> undo_stack;
 

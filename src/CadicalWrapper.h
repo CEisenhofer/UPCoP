@@ -65,7 +65,7 @@ public:
         }
     }
 
-    unsigned vars() {
+    unsigned vars() const {
         return (unsigned)solver->vars();
     }
 

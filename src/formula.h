@@ -55,8 +55,8 @@ class formula_manager {
     false_term* falseTerm;
 
     std::vector<formula_term*> id_to_formula;
-    std::vector<literal_term*> cadical_to_formula;
-    std::vector<literal_term*> neg_cadical_to_formula;
+    std::vector<literal> cadical_to_formula;
+    std::vector<literal> neg_cadical_to_formula;
 
     std::unordered_map<formula_term*, formula_term*> not_cache;
     std::unordered_map<std::vector<formula_term*>, and_term*> and_cache;
@@ -68,22 +68,22 @@ public:
 
     false_term* mk_false() const;
 
-    literal_term* mk_lit(unsigned v, bool neg);
+    literal mk_lit(unsigned v, bool neg);
 
-    literal_term* mk_lit(signed v);
+    literal mk_lit(signed v);
 
-    literal_term* mk_not(literal_term* c);
+    literal mk_not(literal c);
     formula_term* mk_not(formula_term* c);
 
     formula_term* mk_or(std::vector<formula_term*> c, bool positive = false);
     formula_term* mk_and(std::vector<formula_term*> c, bool positive = false);
 
 #ifndef NDEBUG
-    formula_term* mk_or_slow(const std::vector<literal_term*>& c){
+    formula_term* mk_or_slow(const std::vector<literal>& c){
         return mk_or(std::vector<formula_term*>(c.begin(), c.end()));
     }
 
-    formula_term* mk_and_slow(const std::vector<literal_term*>& c) {
+    formula_term* mk_and_slow(const std::vector<literal>& c) {
         return mk_and(std::vector<formula_term*>(c.begin(), c.end()));
     }
 #endif
@@ -160,7 +160,7 @@ public:
     // first:  0 -> just create a new variable and return it
     // first:  1 -> inline the variable positively
     // first: -1 -> inline the variable negatively
-    virtual const literal_term* get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) = 0;
+    virtual const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) = 0;
 
     virtual z3::expr get_z3(z3_propagator& propagator) = 0;
 
@@ -200,7 +200,7 @@ public:
         return name;
     }
 
-    const literal_term* get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override {
+    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override {
         return this;
     }
 
@@ -216,7 +216,7 @@ struct false_term : public literal_term {
 
     std::string to_string() const final { return "false"; }
 
-    const literal_term* get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) final {
+    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) final {
         return nullptr;
     }
 
@@ -232,7 +232,7 @@ struct true_term : public literal_term {
 
     std::string to_string() const final { return "true"; }
 
-    const literal_term* get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) final {
+    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) final {
         return nullptr;
     }
 
@@ -255,7 +255,7 @@ public:
         return name;
     }
 
-    const literal_term* get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override;
+    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override;
 
     z3::expr get_z3(z3_propagator& propagator) final;
 
@@ -301,7 +301,7 @@ public:
         return name;
     }
 
-    const literal_term* get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override;
+    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override;
 
     z3::expr get_z3(z3_propagator& propagator) final;
 
@@ -327,7 +327,7 @@ public:
         return name;
     }
 
-    const literal_term* get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override;
+    const literal get_lits(propagator_base& propagator, std::vector<std::vector<int>>& aux) override;
 
     z3::expr get_z3(z3_propagator& propagator) final;
 

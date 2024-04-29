@@ -95,6 +95,9 @@ class matrix_propagator : public propagator_base {
     vector<clause_instance*> chosen;
     vector<clause_instance*> not_chosen;
 
+    vector<vector<formula>> selectionExprs;
+    unsigned selectionIdx = 0;
+
     unordered_map<literal, clause_instance*> exprToInfo;
     unordered_map<literal, int> clauseLimitMap;
     vector<literal> clauseLimitListExpr;
@@ -156,7 +159,7 @@ public:
 
     void pb_clause_limit();
 
-    void fixed(literal e, bool value);
+    void fixed(literal e, bool value) final;
 
     bool delayed_rp(clause_instance* info);
 
