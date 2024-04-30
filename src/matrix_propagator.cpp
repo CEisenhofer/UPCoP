@@ -166,30 +166,30 @@ bool matrix_propagator::are_same_atom(const ground_literal& l1, const ground_lit
 
 static int cnt = 0;
 void matrix_propagator::push() {
-    cnt++;
-    if (cnt % 1000 == 0) {
-        unsigned conjectureIdx = -1;
-        for (unsigned i = 0; i < chosen.size(); i++) {
-            std::cout << chosen[i]->clause->index << "/" << chosen[i]->copyIdx << "  ";
-            if (conjectureIdx == -1 && chosen[i]->clause->conjecture) {
-                conjectureIdx = i;
-            }
-        }
-        std::cout << std::endl;
-        if (conjectureIdx == -1) {
-            std::cout << "No conjecture selected?! DL: " << decision_level() << std::endl;
-        }
-        else {
-            std::cout << "Conjecture: " << chosen[conjectureIdx]->clause->index << "/" << chosen[conjectureIdx]->copyIdx << std::endl;
-        }
-    }
+    // cnt++;
+    // if (cnt % 1000 == 0) {
+    //     unsigned conjectureIdx = -1;
+    //     for (unsigned i = 0; i < chosen.size(); i++) {
+    //         std::cout << chosen[i]->clause->index << "/" << chosen[i]->copyIdx << "  ";
+    //         if (conjectureIdx == -1 && chosen[i]->clause->conjecture) {
+    //             conjectureIdx = i;
+    //         }
+    //     }
+    //     std::cout << std::endl;
+    //     if (conjectureIdx == -1) {
+    //         std::cout << "No conjecture selected?! DL: " << decision_level() << std::endl;
+    //     }
+    //     else {
+    //         std::cout << "Conjecture: " << chosen[conjectureIdx]->clause->index << "/" << chosen[conjectureIdx]->copyIdx << std::endl;
+    //     }
+    // }
 }
 
 void matrix_propagator::check_proof(z3::context& ctx) {
     if (!progParams.checkProof)
         return;
 
-    z3::solver z3Solver(ctx);
+    z3::solver z3Solver(ctx, z3::solver::simple());
 
     unordered_map<term_instance*, optional<z3::expr>> lookup;
     vector<term_instance*> allTerms;
@@ -950,7 +950,10 @@ void matrix_propagator::find_path_sat(const vector<clause_instance*>& clauses, v
     } while (foundPaths.size() < MAX_FINAL_PATHS);
 }
 
+static unsigned c = 0;
+
 literal matrix_propagator::decide() {
+    c++;
     if (selectionIdx == selectionExprs.size())
         return m.mk_false();
     unsigned prev = selectionIdx;
@@ -973,8 +976,8 @@ literal matrix_propagator::decide() {
                 break;
             }
         }
-        if (!satisfied) {
-            assert(unassigned != nullptr);
+        if (!satisfied && unassigned != nullptr) {
+            // assert(unassigned != nullptr); -- actually, there should be a conflict
             add_undo([this, prev]() { selectionIdx = prev; });
             return unassigned;
         }
