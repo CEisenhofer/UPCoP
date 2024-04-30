@@ -201,14 +201,16 @@ bool CaDiCal_propagator::soft_propagate(const justification& just, literal prop)
 
 CaDiCal_propagator::CaDiCal_propagator(propagator_base* base, unsigned timeLeft) : base(base), m(base), solver(new CaDiCaL::Solver()),
                                                             stopTime(std::chrono::milliseconds(timeLeft) + std::chrono::high_resolution_clock::now()) {
+    solver->configure("plain");
     solver->set("ilb", 0);
     solver->set("ilbassumptions", 0);
     // solver->set("chrono", 0);
-    // solver->set("phase", 0);
     solver->set("inprocessing", 0);
     solver->set("lucky", 0);
     solver->set("walk", 0);
-    solver->configure("plain");
+    solver->set("phase", 0);
+    solver->set("rephase", 0);
+    solver->set("forcephase", 1);
     solver->connect_terminator(this);
     solver->connect_fixed_listener(this);
     solver->connect_external_propagator(this);

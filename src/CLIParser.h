@@ -28,12 +28,12 @@ struct ProgParams {
     IncStrategy mode = Rectangle;
     unsigned depth = 1;
     unsigned maxDepth = UINT_MAX;
-    bool preprocess = true;
+    bool preprocess = false;
     bool checkProof = false;
     bool smt = false;
     ConjStrategy conjectures = Keep;
     bool satSplit = true; // TODO: For now let's fix it
-    InputFormat format = TPTP;
+    InputFormat format = SMTLIB;
 
     std::vector<unsigned> multiplicity;
     std::vector<unsigned> priority;
@@ -41,8 +41,8 @@ struct ProgParams {
 #if defined(_WIN32) || defined(_WIN64)
 
     ProgParams() {
-        Format = SMTLIB;
-        Preprocess = false;
+        format = SMTLIB;
+        preprocess = false;
     }
 
 #else

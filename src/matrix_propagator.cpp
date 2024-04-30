@@ -630,9 +630,6 @@ formula_term* matrix_propagator::connect_literal(literal just, clause_instance* 
                     continue; // We don't want to connect to itself...
                 literal selector = cachedClause[k]->selector;
                 vector<formula> constraints = { selector };
-                if (cadicalPropagator != nullptr) {
-                    cadicalPropagator->solver->phase(-selector->get_lit());
-                }
                 unification->get_pos_constraints(*this, lit, cachedClause[k]->literals[j], constraints);
                 formula conj = m.mk_and(constraints);
                 if (conj->is_true()) [[unlikely]]
@@ -695,7 +692,6 @@ void matrix_propagator::final() {
 
     vector<vector<vector<path_element>>> submatrix_paths;
     LogN("Final (" << finalCnt << ")");
-    std::cout << "Final (" << finalCnt << ")" << std::endl;
 
     if (false) {
         unordered_set<clause_instance*> visited;
